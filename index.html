@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIGNOO — مترجم لغة الإشارة الأردنية</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%8B%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">✋</span>
+    <div>
+      <h1>SIGNOO</h1>
+      <p>مترجم لغة الإشارة الأردنية · Jordanian Sign Language Translator</p>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" role="tab" data-view="translate">الترجمة</button>
+    <button class="tab" role="tab" data-view="train">تعليم الإشارات</button>
+    <button class="tab" role="tab" data-view="data">البيانات</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ═══════════ camera column (shared by translate + train) ═══════════ -->
+  <section class="stage" id="stage">
+    <div class="camera-wrap">
+      <video id="video" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+
+      <div class="cam-badge" id="camBadge">الكاميرا متوقفة</div>
+      <div class="countdown" id="countdown" hidden></div>
+
+      <div class="cam-empty" id="camEmpty">
+        <p class="cam-empty-icon" aria-hidden="true">📷</p>
+        <p>اضغط «تشغيل الكاميرا» للبدء</p>
+        <p class="muted">كل المعالجة تتم على جهازك — لا يتم رفع أي فيديو.</p>
+      </div>
+    </div>
+
+    <div class="cam-controls">
+      <button id="btnCamera" class="btn btn-primary">تشغيل الكاميرا</button>
+      <label class="switch">
+        <input type="checkbox" id="chkMirror" checked>
+        <span>عكس الصورة (مرآة)</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="chkSkeleton" checked>
+        <span>إظهار نقاط اليد</span>
+      </label>
+      <span class="hands-readout" id="handsReadout">لا توجد يد</span>
+    </div>
+  </section>
+
+  <!-- ═══════════ translate view ═══════════ -->
+  <section class="panel" id="view-translate">
+    <div class="panel-head">
+      <h2>الترجمة المباشرة</h2>
+      <button id="btnTranslate" class="btn btn-primary" disabled>بدء الترجمة</button>
+    </div>
+
+    <div class="meter" id="liveMeter">
+      <div class="meter-label">
+        <span id="liveLabel">—</span>
+        <span id="liveConf">0%</span>
+      </div>
+      <div class="meter-track"><div class="meter-fill" id="liveFill"></div></div>
+    </div>
+
+    <div class="output">
+      <div class="out-block">
+        <div class="out-head">
+          <h3>العربية</h3>
+          <button class="btn btn-ghost btn-sm" data-speak="ar">🔊 نطق</button>
+        </div>
+        <p class="out-text" id="outAr" dir="rtl" lang="ar">…</p>
+      </div>
+      <div class="out-block">
+        <div class="out-head">
+          <h3>English</h3>
+          <button class="btn btn-ghost btn-sm" data-speak="en">🔊 Speak</button>
+        </div>
+        <p class="out-text" id="outEn" dir="ltr" lang="en">…</p>
+      </div>
+    </div>
+
+    <div class="out-actions">
+      <button id="btnClear" class="btn btn-ghost btn-sm">مسح الجملة</button>
+      <button id="btnBackspace" class="btn btn-ghost btn-sm">حذف آخر كلمة</button>
+      <button id="btnCopy" class="btn btn-ghost btn-sm">نسخ</button>
+      <label class="switch">
+        <input type="checkbox" id="chkAutoSpeak">
+        <span>نطق تلقائي</span>
+      </label>
+    </div>
+
+    <details class="tuning">
+      <summary>إعدادات الحساسية</summary>
+      <label class="range">
+        <span>حد الثقة <b id="valConf">70%</b></span>
+        <input type="range" id="rngConf" min="30" max="95" value="70">
+      </label>
+      <label class="range">
+        <span>الثبات المطلوب <b id="valStable">3</b> إطارات</span>
+        <input type="range" id="rngStable" min="1" max="8" value="3">
+      </label>
+      <label class="range">
+        <span>الفاصل بين الكلمات <b id="valCooldown">1.0</b> ثانية</span>
+        <input type="range" id="rngCooldown" min="2" max="30" value="10">
+      </label>
+    </details>
+
+    <p class="hint" id="translateHint"></p>
+  </section>
+
+  <!-- ═══════════ train view ═══════════ -->
+  <section class="panel" id="view-train" hidden>
+    <div class="panel-head">
+      <h2>تعليم الإشارات</h2>
+    </div>
+    <p class="hint">
+      اختر كلمة، ثم سجّل الإشارة عدة مرات (٥ مرات أو أكثر أفضل). نوّع قليلاً في السرعة
+      والمسافة عن الكاميرا حتى يتعلّم البرنامج الإشارة بشكل أدق.
+    </p>
+
+    <div class="train-grid">
+      <label class="field">
+        <span>الكلمة</span>
+        <select id="selWord"></select>
+      </label>
+      <label class="field">
+        <span>مدة التسجيل</span>
+        <select id="selDuration">
+          <option value="900">قصيرة — 0.9 ث (إشارة ثابتة)</option>
+          <option value="1500" selected>متوسطة — 1.5 ث</option>
+          <option value="2200">طويلة — 2.2 ث (حركة كاملة)</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="train-actions">
+      <button id="btnRecord" class="btn btn-primary" disabled>تسجيل عيّنة</button>
+      <span class="sample-count" id="sampleCount">٠ عيّنات لهذه الكلمة</span>
+    </div>
+
+    <div class="new-word">
+      <h3>إضافة كلمة جديدة</h3>
+      <div class="train-grid">
+        <label class="field"><span>بالعربية</span><input id="newAr" type="text" placeholder="مثال: صباح الخير" dir="rtl"></label>
+        <label class="field"><span>بالإنجليزية</span><input id="newEn" type="text" placeholder="e.g. good morning" dir="ltr"></label>
+      </div>
+      <button id="btnAddWord" class="btn btn-ghost btn-sm">إضافة الكلمة</button>
+    </div>
+  </section>
+
+  <!-- ═══════════ data view ═══════════ -->
+  <section class="panel" id="view-data" hidden>
+    <div class="panel-head">
+      <h2>البيانات المحفوظة</h2>
+    </div>
+    <p class="hint">
+      البيانات محفوظة داخل متصفحك فقط. صدّرها إلى ملف لحفظ نسخة احتياطية أو لمشاركتها
+      مع جهاز آخر.
+    </p>
+    <div class="train-actions">
+      <button id="btnExport" class="btn btn-ghost btn-sm">تصدير إلى ملف</button>
+      <button id="btnImport" class="btn btn-ghost btn-sm">استيراد من ملف</button>
+      <button id="btnReset" class="btn btn-danger btn-sm">حذف كل البيانات</button>
+      <input type="file" id="fileImport" accept="application/json" hidden>
+    </div>
+    <div class="stats" id="stats"></div>
+    <table class="table" id="wordTable">
+      <thead><tr><th>الكلمة</th><th>English</th><th>العيّنات</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="assets/app.js"></script>
+</body>
+</html>

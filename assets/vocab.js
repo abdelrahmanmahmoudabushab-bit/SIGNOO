@@ -1,0 +1,69 @@
+// Starter vocabulary for SIGNOO.
+//
+// These are ONLY word labels (Arabic + English translations). They deliberately
+// contain no description of how each sign is performed — the signs themselves are
+// taught to the app by recording them in the "تعليم الإشارات" tab, by someone who
+// actually knows Jordanian Sign Language (LIU / لغة الإشارة الأردنية).
+//
+// Add, remove or translate freely: this list is just a convenient starting point.
+
+export const STARTER_WORDS = [
+  // التحيّات — greetings
+  { id: 'salam',        ar: 'السلام عليكم', en: 'peace be upon you' },
+  { id: 'marhaba',      ar: 'مرحبا',        en: 'hello' },
+  { id: 'sabah_alkhair',ar: 'صباح الخير',   en: 'good morning' },
+  { id: 'masa_alkhair', ar: 'مساء الخير',   en: 'good evening' },
+  { id: 'maa_salama',   ar: 'مع السلامة',   en: 'goodbye' },
+  { id: 'shukran',      ar: 'شكرا',         en: 'thank you' },
+  { id: 'afwan',        ar: 'عفوا',         en: "you're welcome" },
+  { id: 'asif',         ar: 'آسف',          en: 'sorry' },
+
+  // أساسيات — essentials
+  { id: 'naam',         ar: 'نعم',          en: 'yes' },
+  { id: 'la',           ar: 'لا',           en: 'no' },
+  { id: 'min_fadlak',   ar: 'من فضلك',      en: 'please' },
+  { id: 'musaada',      ar: 'مساعدة',       en: 'help' },
+  { id: 'fahimt',       ar: 'فهمت',         en: 'I understand' },
+  { id: 'ma_fahimt',    ar: 'لم أفهم',      en: "I don't understand" },
+  { id: 'kaif_halak',   ar: 'كيف حالك',     en: 'how are you' },
+  { id: 'bikhair',      ar: 'بخير',         en: 'fine' },
+
+  // الضمائر — pronouns
+  { id: 'ana',          ar: 'أنا',          en: 'I' },
+  { id: 'anta',         ar: 'أنت',          en: 'you' },
+  { id: 'huwa',         ar: 'هو',           en: 'he' },
+  { id: 'hiya',         ar: 'هي',           en: 'she' },
+  { id: 'nahnu',        ar: 'نحن',          en: 'we' },
+
+  // العائلة — family
+  { id: 'umm',          ar: 'أم',           en: 'mother' },
+  { id: 'ab',           ar: 'أب',           en: 'father' },
+  { id: 'akh',          ar: 'أخ',           en: 'brother' },
+  { id: 'ukht',         ar: 'أخت',          en: 'sister' },
+  { id: 'sadeeq',       ar: 'صديق',         en: 'friend' },
+  { id: 'aila',         ar: 'عائلة',        en: 'family' },
+
+  // الحاجات اليومية — daily needs
+  { id: 'ma',           ar: 'ماء',          en: 'water' },
+  { id: 'akl',          ar: 'طعام',         en: 'food' },
+  { id: 'bait',         ar: 'بيت',          en: 'home' },
+  { id: 'madrasa',      ar: 'مدرسة',        en: 'school' },
+  { id: 'amal',         ar: 'عمل',          en: 'work' },
+  { id: 'mustashfa',    ar: 'مستشفى',       en: 'hospital' },
+  { id: 'sayara',       ar: 'سيارة',        en: 'car' },
+  { id: 'hatif',        ar: 'هاتف',         en: 'phone' },
+
+  // الأسئلة — question words
+  { id: 'ma_hatha',     ar: 'ما هذا',       en: 'what is this' },
+  { id: 'ayna',         ar: 'أين',          en: 'where' },
+  { id: 'mata',         ar: 'متى',          en: 'when' },
+  { id: 'kam',          ar: 'كم',           en: 'how much' },
+  { id: 'limatha',      ar: 'لماذا',        en: 'why' },
+
+  // المشاعر — feelings
+  { id: 'saeed',        ar: 'سعيد',         en: 'happy' },
+  { id: 'hazeen',       ar: 'حزين',         en: 'sad' },
+  { id: 'taban',        ar: 'تعبان',        en: 'tired' },
+  { id: 'jaee',         ar: 'جائع',         en: 'hungry' },
+  { id: 'uhibb',        ar: 'أحب',          en: 'love' },
+];
