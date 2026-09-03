@@ -75,6 +75,25 @@ python ml/train.py data/processed/manifest.json --split data/split.json
 python ml/evaluate.py models/signoo.pt data/processed/manifest.json --split data/split.json
 ```
 
+### Collecting the data
+
+`record.html` is a recording studio for collection sessions. Serve the folder and open
+**http://localhost:8000/record.html**.
+
+It walks a signer through the word list, records fixed-length clips on the space bar,
+tracks progress, and exports the whole session as a ZIP in exactly the layout
+`ml/extract_landmarks.py` expects:
+
+```
+S07/salam/S07_salam_r00.webm
+S07/salam/S07_salam_r00.json     ← signer, sign, repetition, lighting, distance, device
+S07/session.json
+```
+
+Unzip it into `data/raw/` and run the extractor — no manual filing. The studio will not
+start a session until consent is confirmed, and rejects signer IDs that look like real
+names, because these recordings are identifiable biometric data.
+
 Two documents carry the real content:
 
 - **[docs/DATA_COLLECTION.md](docs/DATA_COLLECTION.md)** — how to collect a dataset
@@ -97,6 +116,8 @@ same model, same data. `ml/compare_splits.py` measures that gap on your own data
 | `assets/vocab.js` | Starter word list (Arabic ↔ English labels) |
 | `assets/app.js` | Camera loop, recording, live translation, UI |
 | `assets/styles.css` | Styling |
+| `record.html` · `assets/record.js` | Dataset recording studio |
+| `assets/zip.js` | Minimal ZIP writer for session export |
 | `ml/features.py` | Landmark features: body-centred, scale- and speed-invariant |
 | `ml/model.py` | Transformer encoder classifier (~1.3 M parameters) |
 | `ml/data.py` | Dataset, augmentation, and signer-independent splitting |

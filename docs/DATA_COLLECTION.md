@@ -114,6 +114,12 @@ and sleeves that hide the wrists.
 
 ## 5. Session procedure
 
+**Use the recording studio.** Open `record.html` (see the README) rather than filing
+clips by hand — it enforces the naming and folder layout the pipeline expects, records
+the session conditions into every clip's metadata, and exports a ZIP that unzips
+straight into `data/raw/`. Hand-filed sessions are where labelling errors come from.
+
+
 For each signer:
 
 1. Explain the project and obtain consent (in LIU).

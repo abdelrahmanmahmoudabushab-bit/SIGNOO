@@ -46,14 +46,21 @@ def _points(landmarks, n):
     return np.array([[p.x, p.y, p.z] for p in landmarks[:n]], dtype=np.float32)
 
 
-def landmarks_from_video(path, landmarker, cv2):
-    """Runs Holistic over one video, returning a list of normalised frames."""
+def landmarks_from_video(path, make_landmarker, cv2):
+    """Runs Holistic over one video, returning a list of normalised frames.
+
+    A fresh landmarker per clip, deliberately. In VIDEO mode MediaPipe tracks across
+    frames and requires timestamps to increase, so a shared instance would both carry
+    tracking state from one signer's clip into the next and reject the second clip's
+    timestamps for restarting at zero.
+    """
     import mediapipe as mp
 
     cap = cv2.VideoCapture(str(path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frames = []
     index = 0
+    landmarker = make_landmarker()
     try:
         while True:
             ok, frame = cap.read()
@@ -74,6 +81,7 @@ def landmarks_from_video(path, landmarker, cv2):
             ))
     finally:
         cap.release()
+        landmarker.close()
     return frames
 
 
@@ -115,42 +123,44 @@ def main():
         min_hand_landmarks_confidence=0.5,
     )
 
+    def make_landmarker():
+        return vision.HolisticLandmarker.create_from_options(options)
+
     manifest, skipped = [], []
-    with vision.HolisticLandmarker.create_from_options(options) as landmarker:
-        for i, video in enumerate(videos, 1):
-            signer_id = video.parent.parent.name
-            sign_id = video.parent.name
-            rel = Path(signer_id) / sign_id / f"{video.stem}.npy"
-            target = out / rel
+    for i, video in enumerate(videos, 1):
+        signer_id = video.parent.parent.name
+        sign_id = video.parent.name
+        rel = Path(signer_id) / sign_id / f"{video.stem}.npy"
+        target = out / rel
 
-            if target.exists() and not args.overwrite:
-                pass
-            else:
-                frames = landmarks_from_video(video, landmarker, cv2)
-                if not frames:
-                    skipped.append(f"{video} (no frames)")
-                    continue
-                tracked = float(np.mean([f.any() for f in frames]))
-                if tracked < 0.5:
-                    skipped.append(f"{video} (body tracked in only {tracked:.0%} of frames)")
-                    continue
-                target.parent.mkdir(parents=True, exist_ok=True)
-                np.save(target, resample(frames))
+        if target.exists() and not args.overwrite:
+            pass
+        else:
+            frames = landmarks_from_video(video, make_landmarker, cv2)
+            if not frames:
+                skipped.append(f"{video} (no frames)")
+                continue
+            tracked = float(np.mean([f.any() for f in frames]))
+            if tracked < 0.5:
+                skipped.append(f"{video} (body tracked in only {tracked:.0%} of frames)")
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            np.save(target, resample(frames))
 
-            # Carry the recording metadata through, when it exists.
-            meta_path = video.with_suffix(".json")
-            meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+        # Carry the recording metadata through, when it exists.
+        meta_path = video.with_suffix(".json")
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
 
-            manifest.append({
-                "signer_id": meta.get("signer_id", signer_id),
-                "sign_id": meta.get("sign_id", sign_id),
-                "label_ar": meta.get("label_ar", ""),
-                "label_en": meta.get("label_en", ""),
-                "handedness": meta.get("handedness", "right"),
-                "source": str(video.relative_to(raw)),
-                "features": str(rel),
-            })
-            print(f"  [{i}/{len(videos)}] {rel}", flush=True)
+        manifest.append({
+            "signer_id": meta.get("signer_id", signer_id),
+            "sign_id": meta.get("sign_id", sign_id),
+            "label_ar": meta.get("label_ar", ""),
+            "label_en": meta.get("label_en", ""),
+            "handedness": meta.get("handedness", "right"),
+            "source": str(video.relative_to(raw)),
+            "features": str(rel),
+        })
+        print(f"  [{i}/{len(videos)}] {rel}", flush=True)
 
     (out / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

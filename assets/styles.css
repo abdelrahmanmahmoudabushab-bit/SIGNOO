@@ -149,3 +149,19 @@ h3{font-size:15px;margin:0 0 6px}
 
 /* ── utility ─────────────────────────────── */
 [hidden]{display:none!important}
+
+/* ── recording studio ────────────────────── */
+.consent{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:11px;padding:13px;margin-bottom:14px;
+}
+.consent p{font-size:13px;color:var(--muted);margin:6px 0 10px}
+.consent b{color:var(--text)}
+.current-sign{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:11px;padding:18px;text-align:center;margin:12px 0;
+}
+.current-ar{margin:0;font-size:34px;font-weight:800}
+.current-en{margin:2px 0 0;font-size:15px;color:var(--muted)}
+.current-rep{margin:10px 0 0;font-size:13px;color:var(--accent);font-weight:600}
+code{background:var(--surface-2);padding:1px 6px;border-radius:5px;font-size:12px}

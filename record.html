@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIGNOO — استوديو التسجيل</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%A5%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">🎥</span>
+    <div>
+      <h1>استوديو التسجيل</h1>
+      <p>جمع بيانات لغة الإشارة الأردنية · Dataset recording studio</p>
+    </div>
+  </div>
+  <nav class="tabs">
+    <a class="tab" href="index.html">← المترجم</a>
+  </nav>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="camera-wrap">
+      <video id="video" playsinline muted></video>
+      <div class="cam-badge" id="camBadge">الكاميرا متوقفة</div>
+      <div class="countdown" id="countdown" hidden></div>
+      <div class="cam-empty" id="camEmpty">
+        <p class="cam-empty-icon" aria-hidden="true">🎥</p>
+        <p>ابدأ الجلسة لتشغيل الكاميرا</p>
+        <p class="muted">الفيديو يُحفظ على جهازك فقط ولا يُرفع إلى أي خادم.</p>
+      </div>
+    </div>
+
+    <div class="cam-controls">
+      <button id="btnRecord" class="btn btn-primary" disabled>تسجيل (مسافة)</button>
+      <button id="btnRetake" class="btn btn-ghost btn-sm" disabled>إعادة آخر تسجيل</button>
+      <label class="switch">
+        <input type="checkbox" id="chkMirror" checked><span>عكس الصورة</span>
+      </label>
+      <span class="hands-readout" id="clipCount">٠ مقطع</span>
+    </div>
+
+    <div class="meter" style="margin-top:14px">
+      <div class="meter-label">
+        <span id="progressLabel">لم تبدأ الجلسة</span>
+        <span id="progressPct">٠٪</span>
+      </div>
+      <div class="meter-track"><div class="meter-fill" id="progressFill"></div></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <!-- ══════ session setup ══════ -->
+    <div id="setup">
+      <div class="panel-head"><h2>إعداد الجلسة</h2></div>
+
+      <div class="consent">
+        <h3>قبل البدء</h3>
+        <p>
+          هذه التسجيلات تُظهر وجه وجسد المُشارك، وهي بيانات شخصية. تأكّد من الحصول على
+          <b>موافقة خطية مستنيرة</b> مشروحة بلغة الإشارة قبل التسجيل، ولا تستخدم الاسم
+          الحقيقي في المعرّف.
+        </p>
+        <label class="switch">
+          <input type="checkbox" id="chkConsent">
+          <span>تم الحصول على الموافقة الخطية من المُشارك</span>
+        </label>
+      </div>
+
+      <div class="train-grid">
+        <label class="field">
+          <span>معرّف المُشارك (بدون اسم حقيقي)</span>
+          <input id="signerId" type="text" placeholder="S01" dir="ltr">
+        </label>
+        <label class="field">
+          <span>اليد المسيطرة</span>
+          <select id="handedness">
+            <option value="right">يمين</option>
+            <option value="left">يسار</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>الإضاءة</span>
+          <select id="lighting">
+            <option value="daylight_window">ضوء نهار / نافذة</option>
+            <option value="ceiling_light">إضاءة سقف</option>
+            <option value="evening_lamp">إضاءة مسائية</option>
+            <option value="dim">إضاءة خافتة</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>الخلفية</span>
+          <select id="background">
+            <option value="plain_wall">حائط سادة</option>
+            <option value="furniture">أثاث</option>
+            <option value="busy_room">غرفة مزدحمة</option>
+            <option value="outdoor">خارجي</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>المسافة عن الكاميرا</span>
+          <select id="distance">
+            <option value="1.0">١ متر</option>
+            <option value="1.5" selected>١.٥ متر</option>
+            <option value="2.0">٢ متر</option>
+            <option value="2.5">٢.٥ متر</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>الجهاز</span>
+          <input id="device" type="text" placeholder="laptop / phone" dir="ltr">
+        </label>
+        <label class="field">
+          <span>تكرارات كل إشارة</span>
+          <select id="reps">
+            <option value="3">٣</option>
+            <option value="5" selected>٥</option>
+            <option value="8">٨</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>مدة المقطع</span>
+          <select id="clipMs">
+            <option value="1500">١.٥ ثانية</option>
+            <option value="2000" selected>٢ ثانية</option>
+            <option value="3000">٣ ثوانٍ</option>
+          </select>
+        </label>
+      </div>
+
+      <p class="hint" id="setupHint"></p>
+      <button id="btnStart" class="btn btn-primary">بدء الجلسة</button>
+    </div>
+
+    <!-- ══════ active session ══════ -->
+    <div id="session" hidden>
+      <div class="panel-head">
+        <h2>الإشارة الحالية</h2>
+        <button id="btnEnd" class="btn btn-ghost btn-sm">إنهاء الجلسة</button>
+      </div>
+
+      <div class="current-sign">
+        <p class="current-ar" id="curAr">—</p>
+        <p class="current-en" id="curEn" dir="ltr">—</p>
+        <p class="current-rep" id="curRep"></p>
+      </div>
+
+      <div class="train-actions">
+        <button id="btnPrev" class="btn btn-ghost btn-sm">← السابقة</button>
+        <button id="btnSkip" class="btn btn-ghost btn-sm">تخطّي هذه الإشارة</button>
+        <button id="btnNext" class="btn btn-ghost btn-sm">التالية →</button>
+      </div>
+
+      <p class="hint">
+        ابدأ وانتهِ ويداك في وضع الراحة. نوّع قليلاً في السرعة بين التكرارات.
+        اضغط <b>مسافة</b> للتسجيل.
+      </p>
+
+      <div class="new-word">
+        <h3>حفظ الجلسة</h3>
+        <p class="hint">
+          نزّل ملف ZIP يحتوي المقاطع وبيانات كل مقطع بالبنية التي يتوقّعها
+          <code>ml/extract_landmarks.py</code> مباشرة.
+        </p>
+        <div class="train-actions">
+          <button id="btnDownload" class="btn btn-primary btn-sm">تنزيل ZIP</button>
+          <span class="sample-count" id="sizeNote"></span>
+        </div>
+      </div>
+
+      <table class="table" id="logTable">
+        <thead><tr><th>الإشارة</th><th>التكرارات</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="assets/record.js"></script>
+</body>
+</html>
