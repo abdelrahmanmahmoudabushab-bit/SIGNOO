@@ -110,10 +110,16 @@ Thresholds are per-language and tuned on real recordings, never guessed — sign
 tempo differs between languages and between people.
 
 **Honest about the limit:** this reads *deliberate, paused signing* well and fluent
-connected signing poorly. Fluent signers do not pause between words. v1 therefore asks
-users to sign word-by-word, which is a real usability cost, disclosed rather than
-hidden. True continuous recognition (CTC over the landmark stream) is Phase 4 and
-depends on data volumes that do not yet exist for LIU or ESL.
+connected signing poorly. Fluent signers do not pause between words.
+
+**Fluent recognition is the product requirement, not an optional nice-to-have** — but
+it cannot be built before there is continuous-signing data to train it on, and none
+exists yet for LIU or ESL (Requirements §5.4). v1 therefore asks users to sign
+word-by-word as an interim state, disclosed rather than hidden, while continuous data
+collection runs alongside it. True continuous recognition (CTC over the landmark
+stream, Roadmap Phase 4.5) replaces this the moment enough continuous clips exist —
+the gap is a data problem with a named phase attached to close it, not a permanent
+ceiling.
 
 ### B4 — Recognition
 
@@ -179,10 +185,16 @@ outside the library are flagged and fingerspelled.
 **Sizing, and the tightest constraint in the system:** the Jetson's 8 GB is shared
 between CPU and GPU with no separate VRAM. A 7B model at 4-bit spends ~4.5 GB plus KV
 cache — effectively the entire remaining budget — and the failure mode is swapping,
-which on this board means multi-second stalls rather than graceful slowdown. **v1 uses
-a 3B-class quantised model locally (~2.5 GB), with an optional cloud model when the
-network is available and the site permits it.** This is a product decision, not a
-config value: it bounds how sophisticated answers can be.
+which on this board means multi-second stalls rather than graceful slowdown.
+
+**v1 is cloud-primary with automatic local fallback.** The kiosk prefers a larger
+cloud-hosted model whenever the network is up and the site's data policy allows
+sending the utterance off-device, giving noticeably better answers than the 3B class
+can produce alone. The moment the network is slow or absent, it drops to the local
+3B-class quantised model (~2.5 GB resident) with a visible notice — never a spinner,
+never a failed request the visitor has to retry. This is why B7 sits fully inside the
+offline guarantee in §1 despite preferring the network: the fallback is not a degraded
+mode bolted on afterward, it is the always-available floor the cloud path sits above.
 
 ### B8 — Sign playback
 
@@ -238,8 +250,11 @@ correct, next.
 
 ### B12 — Training
 
-Nightly candidate training on validated data. Runs off-device on a GPU; kiosks never
-train.
+Candidate training on validated data **every 3 days**, off-device on a GPU; kiosks
+never train. The cadence is fixed and fully automatic — what is not automatic is
+whether a candidate ships, which is entirely B13's job. A fast retraining cadence
+without an equally firm gate is how a system quietly teaches itself its own mistakes
+(see B13).
 
 ### B13 — Registry and promotion gate
 
@@ -372,13 +387,15 @@ silent, and extremely expensive bug in this class of system.
 
 Carried into the question round rather than silently decided:
 
-1. **Answering model** — local 3B only, or cloud-primary with local fallback? Bounds
-   answer quality against privacy and connectivity.
+1. ~~Answering model~~ — **resolved:** cloud-primary, automatic local fallback.
 2. **Clip library production** — who records the sign playback library, per language,
    and how large is the initial word list?
-3. **Reviewer capacity** — the learning loop's throughput is entirely gated by Deaf
-   reviewer hours. How many hours per week are actually available?
-4. **Fluent vs word-by-word signing** — is asking visitors to pause between signs
-   acceptable for v1, or does the product require fluent recognition from day one?
-   This single answer moves the timeline by many months.
+3. **Reviewer capacity — now the sharpest open question.** Fluent recognition (Q4,
+   resolved as the target) and originally-recorded LIU/ESL data (§5.4) both need
+   human validation, and none is currently staffed. Zero reviewer hours is workable
+   only if it is temporary: the near-term action is a data-sharing partnership with
+   an institution that already employs Deaf staff (Holy Land Institute for the Deaf;
+   Zayed Higher Organization) rather than building a reviewer team from nothing.
+4. ~~Fluent vs word-by-word~~ — **resolved:** fluent is the target. Sequenced as
+   Roadmap Phase 4.5, gated on continuous-signing data volume, not on a date.
 5. **Deployment sites** — one site or several, and do they share a knowledge base?

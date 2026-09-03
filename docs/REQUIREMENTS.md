@@ -88,7 +88,11 @@ Naming these now prevents a slow, silent expansion of scope later.
 - **FR-K13 Session end.** Return to idle on completion, on a visible countdown after
   inactivity, or on one touch. Clear all session content on return to idle.
 - **FR-K14 Offline operation.** Recognition, translation, and voice continue with no
-  network. Answering degrades to the local model and a clear notice.
+  network. Answering is **cloud-primary with automatic local fallback**: it prefers
+  a larger cloud-hosted model when connectivity is available and site policy permits
+  sending the utterance off-device, and drops to the local 3B model with a visible
+  notice the instant the network is unavailable or slow. The fallback must be
+  seamless to the visitor — no retry button, no visible failure.
 
 ### 3.2 Answering service
 
@@ -112,7 +116,9 @@ Naming these now prevents a slow, silent expansion of scope later.
   validation. Nothing enters training unreviewed.
 - **FR-L4 Prioritised review.** Order the queue by expected value — low-confidence
   cases, corrected cases, and under-represented signs first.
-- **FR-L5 Nightly candidate.** Train a candidate model on validated data on a schedule.
+- **FR-L5 Scheduled candidate.** Train a candidate model on validated data every 3
+  days. The schedule is fixed and automatic; what is **not** automatic is whether a
+  candidate ships (§5.3) — see the note under DR-6.
 - **FR-L6 Promotion gate.** Promote only on passing every criterion in §5.3. Otherwise
   keep the champion and record why.
 - **FR-L7 Shadow run.** Run a passing candidate against live traffic without affecting
@@ -152,7 +158,8 @@ Naming these now prevents a slow, silent expansion of scope later.
 |---|---|---|
 | **NFR-P1** End of sign → word on screen | ≤ 300 ms | 500 ms |
 | **NFR-P2** Utterance complete → assembled text | ≤ 600 ms | 1 s |
-| **NFR-P3** Question → answer text (local model) | ≤ 3 s | 6 s |
+| **NFR-P3a** Question → answer text (cloud path) | ≤ 3 s | 6 s |
+| **NFR-P3b** Question → answer text (local fallback) | ≤ 4 s | 8 s |
 | **NFR-P4** Camera capture | 60 fps sustained | no visible stutter |
 | **NFR-P5** Perception | 30 fps sustained, hot | ≥ 24 fps |
 | **NFR-P6** Cold start to attract screen | ≤ 60 s | 120 s |
@@ -284,6 +291,36 @@ the frozen human-verified benchmark:
 cannot modify, extend, or select into it. This is what makes automatic retraining safe:
 the *training* is automatic, the *judgement* is not.
 
+**DR-7a.** This gate is non-negotiable at any retraining cadence, including the 3-day
+automatic cycle in FR-L5. Without it, a model retrained on its own predictions drifts
+toward its own errors while growing *more* confident — visible to no automatic metric,
+because the metric drifts with it. The benchmark needs building **once**, up front
+(a few hundred clips per language, human-verified), not an ongoing reviewer team; it
+does not need to grow, only to stay honest. This is the one part of the pipeline that
+cannot run on found data or no review at all.
+
+### 5.4 Data acquisition strategy
+
+No dataset can simply be "found and trained on" without checking what it actually is.
+Verified per language:
+
+| Language | What exists publicly | Status |
+|---|---|---|
+| **ASL** | WLASL (~2,000 words), ASL Citizen, How2Sign (80 hrs) — real, downloadable | **Non-commercial research licenses only** (C-UDA / explicit non-revenue terms). Usable for prototyping and internal evaluation now; a shipped product needs a separate commercial licence or a different data source before ASL recognition goes live |
+| **Generic Arabic** (KArSL, ArabSign) | Real, ~500 signs, gated behind emailing the authors (KFUPM) | Saudi dialect, not LIU or ESL. Value is **transfer pretraining only**, contingent on the authors granting access and its terms |
+| **Emirati (ESL)** | UAE government (Zayed Higher Organization) runs a public ~5,000-word dictionary, online and via app | A vocabulary and correctness reference. It is copyrighted government content behind a UI, not a released dataset — using it requires a **data-sharing agreement with ZHO**, not scraping |
+| **Jordanian (LIU)** | A print dictionary exists (Holy Land Institute for the Deaf, 2015, ~500 signs); no digitised video corpus found anywhere | **Nothing to find online.** Original recording remains the only path (`docs/DATA_COLLECTION.md`) |
+
+**DR-8.** No dataset enters training or a shipped product without its licence checked
+against the deployment's actual use (research prototype vs. public commercial kiosk).
+A dataset usable for internal benchmarking is not automatically usable in the product.
+
+**DR-9.** Where an institution (Holy Land Institute for the Deaf, Zayed Higher
+Organization, KFUPM) holds relevant content or expertise, the first move is a formal
+partnership or data-sharing request — not scraping. These institutions also employ or
+work with Deaf staff, which makes them the most efficient answer to both the data gap
+and DR-2's review requirement at once (see `ROADMAP.md` R1/R3).
+
 ---
 
 ## 6. Constraints and obligations
@@ -336,6 +373,16 @@ expression are not separable. Affects negation, question marking, and intensity.
 
 **7.2 Vocabulary-bounded.** Recognition is limited to trained signs. Out-of-vocabulary
 signing is rejected, not guessed.
+
+**7.2a Fluent signing is the target, not the v1 reality.** The product requirement is
+continuous, fluent recognition — signing at natural speed, no pauses between words.
+Continuous sign recognition at this quality is an active research problem even with
+large datasets, and LIU and ESL currently have **no continuous-signing data at all**
+to train it on. v1 therefore uses pause-based segmentation (§ System Design, B3) and
+discloses that constraint rather than hiding it. Closing this gap is sequenced as a
+named phase, not deferred indefinitely — see `ROADMAP.md` Phase 4.5 — and its
+timeline is set by how much continuous data can be collected, which is itself set by
+signer and reviewer availability (DR-1, R1, R3).
 
 **7.3 Utterances, not fluent grammar.** Output follows sign-language order and is
 presented as recognised words, not idiomatic Arabic prose.

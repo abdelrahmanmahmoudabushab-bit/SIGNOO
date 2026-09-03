@@ -119,7 +119,7 @@ opinion.
 - B10 capture with opt-in consent; landmarks by default
 - B11 ingest and prioritised review queue
 - Reviewer workspace built for volume
-- B12 nightly candidate training
+- B12 candidate training every 3 days (fixed automatic cadence)
 - B13 registry, gate, shadow-running, rollback
 - Console: fleet view, datasets, training visibility, model registry, logs, alerts,
   roles
@@ -131,6 +131,36 @@ opinion.
 - Gate rejects a deliberately degraded candidate in the live pipeline
 - Rollback exercised end to end
 - Deletion request honoured through to training snapshots (NFR-S6)
+- **The frozen benchmark exists and is human-verified before the first automatic
+  cycle runs.** Building it is a one-time cost of a few hundred clips per language —
+  not an ongoing reviewer team — and is what makes the 3-day cadence safe to leave
+  unattended (Requirements DR-7a)
+
+---
+
+## Phase 4.5 — Continuous recognition · ~10 weeks, gated on data volume
+
+**Goal:** close the gap between the v1 word-by-word constraint and the actual product
+requirement — fluent, natural-speed signing.
+
+This phase does not start on a calendar date. It starts once continuous-signing data
+volume, collected as a byproduct of Phases 1–4 usage plus any dedicated collection,
+crosses the threshold a CTC-style sequence model needs to train reliably — comparable
+public efforts train on the order of hundreds to a thousand+ hours. Estimate this
+threshold empirically against the actual collected corpus rather than assuming it.
+
+- CTC (or similar) loss over the continuous landmark stream, replacing B3's pause
+  state machine
+- Co-articulation handling — signs blend into their neighbours in fluent signing in a
+  way isolated recognition never has to deal with
+- Re-run the full evaluation discipline from `slr-methodology`: signer-independent
+  split, per-signer floor, frozen benchmark — continuous recognition is not exempt
+
+**Exit criteria**
+
+- Fluent signing recognised at an accuracy and latency the product can ship
+- Word-by-word mode remains available as a fallback for signers who prefer it or for
+  signs the continuous model does not yet cover confidently
 
 ---
 
@@ -166,12 +196,13 @@ Ordered by value, not ease:
 
 1. **Face landmarks** — recovers grammatical expression, the largest single accuracy
    and correctness gain available (Requirements §7.1)
-2. **Continuous recognition** — CTC over the landmark stream, removing the word-by-word
-   constraint. Needs data volumes that do not exist yet for LIU or ESL
-3. **Learned gloss → text** — fluent Arabic instead of templates
-4. **Public dataset release** — with consent, the first open LIU dataset; the project's
+2. **Learned gloss → text** — fluent Arabic instead of templates
+3. **Public dataset release** — with consent, the first open LIU dataset; the project's
    most durable contribution
-5. **Two-way** — voice input for hearing users, answered in sign
+4. **Two-way** — voice input for hearing users, answered in sign
+
+(Continuous recognition moved out of this list into Phase 4.5 — it is a named,
+gated phase now, not an indefinitely deferred nice-to-have.)
 
 ---
 
@@ -179,9 +210,10 @@ Ordered by value, not ease:
 
 | # | Risk | Impact | Mitigation |
 |---|---|---|---|
-| R1 | **Too few signers recruited** | Fatal — no dataset, no model | Start week one; partner with Deaf clubs and institutes; compensate; treat signer count as the primary project metric |
+| R1 | **Too few signers recruited** | Fatal — no dataset, no model | Start week one. Verified: no usable public LIU corpus exists and no usable public ESL corpus exists either (ESL127 and the ZHO dictionary are references, not training sets). Pursue institutional partnerships (Holy Land Institute for the Deaf, Zayed Higher Organization) before ad-hoc recruitment — they can supply both signers and reviewers under one agreement (R3) |
 | R2 | Accuracy misses NFR-Q1 | Timeline slip | More signers before more model. Budgeted as a Phase 1 extension, not a surprise |
-| R3 | **Reviewer capacity limits the loop** | Learning loop stalls | Prioritised queue so scarce hours go to the highest-value samples; measure hours in Phase 0, not Phase 4 |
+| R3 | **Reviewer capacity limits the loop** | Learning loop stalls | Currently zero reviewer hours committed — this is the project's sharpest constraint alongside R1, and the same institutional-partnership move addresses both at once. Until staffed, the frozen benchmark (DR-7a) is a one-time cost that must still be paid, even at minimal capacity, before the 3-day auto-retrain cadence is switched on |
+| R12 | **Found data used outside its licence** | Legal exposure, forced product change late | WLASL / ASL Citizen / How2Sign are non-commercial research licenses; KArSL / ArabSign are gated behind author contact; the ZHO dictionary is copyrighted government content, not a released dataset. Check licence against actual deployment (research vs. shipped commercial kiosk) before any dataset is used beyond internal prototyping (Requirements DR-8, DR-9) |
 | R4 | Fluent signing unsupported (Open Q4) | Product acceptability | Test with Deaf users in Phase 2, before committing to Phase 3 |
 | R5 | 8 GB budget exceeded | Redesign of B7 | Budget written down in Phase 0; measured every phase; answering model is the first thing unloaded under pressure |
 | R6 | Thermal throttling in enclosure | Latency and stability | Measure hot in Phase 0; validate the real enclosure, not a bench board |
