@@ -1,0 +1,118 @@
+"""Evaluates a trained model on the held-out test signers.
+
+    python ml/evaluate.py models/signoo.pt data/processed/manifest.json --split data/split.json
+
+Reports per-signer accuracy, per-sign accuracy and the worst confusions. The headline
+number matters less than the spread: a model that averages 85% but collapses to 40%
+on one signer is not ready, and the average hides that.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from collections import defaultdict
+from pathlib import Path
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+from data import SignDataset, load_manifest, split_by_signer
+from model import SignTransformer
+
+
+def predict(model, samples, labels, device, batch_size=32):
+    loader = DataLoader(SignDataset(samples, labels, augment=False), batch_size=batch_size)
+    preds, probs = [], []
+    model.eval()
+    with torch.no_grad():
+        for x, _ in loader:
+            logits = model(x.to(device).float())
+            p = torch.softmax(logits, dim=1)
+            probs.append(p.cpu().numpy())
+            preds.append(logits.argmax(1).cpu().numpy())
+    return np.concatenate(preds), np.concatenate(probs)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("checkpoint")
+    ap.add_argument("manifest")
+    ap.add_argument("--split", required=True)
+    ap.add_argument("--report", help="write full metrics to this JSON file")
+    args = ap.parse_args()
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    labels = ckpt["labels"]
+    inverse = {v: k for k, v in labels.items()}
+
+    samples = load_manifest(args.manifest)
+    split = json.loads(Path(args.split).read_text(encoding="utf-8"))
+    _, _, test = split_by_signer(samples, split["val"], split["test"])
+
+    model = SignTransformer(input_dim=ckpt["input_dim"], num_classes=len(labels)).to(device)
+    model.load_state_dict(ckpt["model"])
+
+    preds, probs = predict(model, test, labels, device)
+    truth = np.array([labels[s.sign_id] for s in test])
+    correct = preds == truth
+
+    print(f"\ntest signers: {', '.join(sorted({s.signer_id for s in test}))}")
+    print(f"{len(test)} clips · {len(labels)} signs\n")
+    print(f"top-1 accuracy: {correct.mean():.1%}")
+
+    # Top-5 shows whether the right answer is at least in contention — useful when
+    # the interface can offer the user a choice rather than committing to one word.
+    top5 = np.argsort(-probs, axis=1)[:, :5]
+    print(f"top-5 accuracy: {np.mean([t in row for t, row in zip(truth, top5)]):.1%}")
+
+    # ── per signer ────────────────────────────────────────────────────────
+    print("\nper signer:")
+    by_signer = defaultdict(list)
+    for s, ok in zip(test, correct):
+        by_signer[s.signer_id].append(ok)
+    per_signer = {k: float(np.mean(v)) for k, v in sorted(by_signer.items())}
+    for signer, acc in per_signer.items():
+        print(f"  {signer}: {acc:.1%}  ({len(by_signer[signer])} clips)")
+
+    if per_signer and max(per_signer.values()) - min(per_signer.values()) > 0.15:
+        print("\n  ⚠ large spread between signers — the model is signer-dependent.")
+        print("    More signers in training will help more than a bigger model.")
+
+    # ── per sign ──────────────────────────────────────────────────────────
+    by_sign = defaultdict(list)
+    for s, ok in zip(test, correct):
+        by_sign[s.sign_id].append(ok)
+    per_sign = {k: float(np.mean(v)) for k, v in by_sign.items()}
+
+    worst = sorted(per_sign.items(), key=lambda kv: kv[1])[:10]
+    print("\nweakest signs:")
+    for sign, acc in worst:
+        print(f"  {sign}: {acc:.0%}  ({len(by_sign[sign])} clips)")
+
+    # ── confusions ────────────────────────────────────────────────────────
+    confusions = defaultdict(int)
+    for t, p in zip(truth, preds):
+        if t != p:
+            confusions[(inverse[t], inverse[p])] += 1
+
+    print("\nmost common confusions:")
+    for (true_sign, pred_sign), n in sorted(confusions.items(), key=lambda kv: -kv[1])[:10]:
+        print(f"  {true_sign} → {pred_sign}  ×{n}")
+    print("\nConfused pairs are worth watching by eye: often they genuinely differ")
+    print("only in facial expression, which a hand-and-body model cannot see.")
+
+    if args.report:
+        Path(args.report).write_text(json.dumps({
+            "top1": float(correct.mean()),
+            "top5": float(np.mean([t in row for t, row in zip(truth, top5)])),
+            "per_signer": per_signer,
+            "per_sign": per_sign,
+            "confusions": {f"{a}->{b}": n for (a, b), n in confusions.items()},
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\nreport → {args.report}")
+
+
+if __name__ == "__main__":
+    main()

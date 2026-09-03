@@ -61,6 +61,31 @@ lower it for faster response.
 file. Recordings live in the browser's storage, so clearing site data erases them.
 Export before you have much to lose, and to move a trained set to another device.
 
+## تدريب نموذج خاص · Training a real LIU model
+
+The browser app above learns from one signer. Building a model that works for **any**
+signer is a separate, larger project, and the pipeline for it lives in `ml/`:
+
+```bash
+pip install -r requirements.txt
+
+python ml/extract_landmarks.py data/raw --out data/processed   # video → landmarks
+python ml/clean.py data/processed/manifest.json                # quality checks
+python ml/train.py data/processed/manifest.json --split data/split.json
+python ml/evaluate.py models/signoo.pt data/processed/manifest.json --split data/split.json
+```
+
+Two documents carry the real content:
+
+- **[docs/DATA_COLLECTION.md](docs/DATA_COLLECTION.md)** — how to collect a dataset
+  that is worth training on: signer diversity, consent, recording protocol, splits.
+- **[docs/TRAINING.md](docs/TRAINING.md)** — the model, the features, and how to
+  evaluate honestly.
+
+The one rule that matters most: **split by signer, never randomly.** On this pipeline
+a random split scored 99.2% where the honest signer-independent split scored 52.9% —
+same model, same data. `ml/compare_splits.py` measures that gap on your own data.
+
 ## بنية المشروع · Project layout
 
 | File | Purpose |
@@ -72,6 +97,13 @@ Export before you have much to lose, and to move a trained set to another device
 | `assets/vocab.js` | Starter word list (Arabic ↔ English labels) |
 | `assets/app.js` | Camera loop, recording, live translation, UI |
 | `assets/styles.css` | Styling |
+| `ml/features.py` | Landmark features: body-centred, scale- and speed-invariant |
+| `ml/model.py` | Transformer encoder classifier (~1.3 M parameters) |
+| `ml/data.py` | Dataset, augmentation, and signer-independent splitting |
+| `ml/clean.py` | Dataset quality checks |
+| `ml/train.py` · `ml/evaluate.py` | Training and honest evaluation |
+| `ml/compare_splits.py` | Measures how much a random split inflates accuracy |
+| `ml/make_synthetic.py` | Synthetic data for testing the pipeline |
 
 ### How recognition works, in more detail
 

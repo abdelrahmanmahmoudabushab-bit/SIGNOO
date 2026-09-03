@@ -5,3 +5,10 @@ node_modules/
 .vscode/
 .idea/
 vendor/
+
+# Python / ML
+.venv/
+__pycache__/
+*.pyc
+data/
+models/
