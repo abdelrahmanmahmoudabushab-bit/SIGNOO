@@ -10,5 +10,16 @@ vendor/
 .venv/
 __pycache__/
 *.pyc
-data/
+/data/
 models/
+
+# kiosk/ runtime state — not source. `/data/` above is anchored to the repo root
+# on purpose so it does NOT also match kiosk/data/, which holds real source
+# (kiosk/data/knowledge_base.json, the B7 seed content) alongside this queue.
+kiosk/data/pending_uploads/*
+!kiosk/data/pending_uploads/.gitkeep
+
+# server/ dev database + training-run scratch space — not source.
+server/*.db
+server/runs/
+

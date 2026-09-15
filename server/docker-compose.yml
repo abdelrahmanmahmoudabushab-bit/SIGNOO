@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: signoo
+      POSTGRES_PASSWORD: signoo_dev_password
+      POSTGRES_DB: signoo
+    ports:
+      - "5432:5432"
+    volumes:
+      - signoo_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U signoo -d signoo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  signoo_pg_data:
