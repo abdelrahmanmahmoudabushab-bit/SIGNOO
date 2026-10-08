@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from features import FRAME_DIM, HAND_DIM, POSE_DIM, SEQ_LEN
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.features import FRAME_DIM, HAND_DIM, POSE_DIM, SEQ_LEN
 
 
 def make_clip(sign, signer, rng, signal=0.6, style_strength=0.25, shared_axes=0):

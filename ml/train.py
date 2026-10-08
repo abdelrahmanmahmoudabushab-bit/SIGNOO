@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -17,8 +18,9 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from data import SignDataset, describe, label_index, load_manifest, split_by_signer
-from features import FRAME_DIM
+from core.features import FRAME_DIM
 from model import SignTransformer, count_parameters
 
 

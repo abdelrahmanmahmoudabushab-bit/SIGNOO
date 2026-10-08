@@ -51,7 +51,8 @@ the difference between testing ten ideas a day and one.
 
 ## What the features are
 
-`ml/features.py`, per frame:
+`core/features.py`, per frame — shared with the kiosk runtime so training and inference
+compute the same numbers:
 
 | Part | Values |
 |---|---|

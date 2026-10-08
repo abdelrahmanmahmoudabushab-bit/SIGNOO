@@ -1,0 +1,577 @@
+/* SIGNOO kiosk — visitor interface.
+ *
+ * TARGET DEVICE — pinned deliberately, not guessed:
+ *   21" diagonal, 16:9, 1920x1080 (the standard resolution at this panel size)
+ *   ~105 PPI, touched from arm's length (~45-65cm), fullscreen kiosk-mode
+ *   browser (no OS chrome eating into the viewport).
+ *   Deploy at 100% Windows display scaling — a fixed-purpose kiosk has no
+ *   reason to run scaled, and it removes a whole class of "why does this
+ *   look different on the real hardware" bugs before they start.
+ *
+ * Sizing strategy for a SINGLE known device, not an unknown responsive one:
+ *   every clamp(min, Nvw|Nvh, max) below resolves to exactly `max` at
+ *   1920x1080 (verified by evaluating each one against that resolution) —
+ *   `max` IS the real design value on the real device. `min` exists only as
+ *   a floor if the logical viewport is ever smaller than 1920x1080 (a
+ *   different/cheaper panel, or scaling left on despite the note above);
+ *   it is not there to make this "responsive" in the general sense.
+ *
+ * Light, warm, Arabic-first. Self-contained: assets/styles.css is the old
+ * desktop-MVP sheet (record.html still uses it) and its 13-22px type scale is
+ * wrong on a screen read from a metre away.
+ *
+ * Palette reasoning: a light, warm pink ground rather than a tinted white or
+ * a neutral grey — pink is the brand colour, kept light so it stays a kiosk
+ * surface and not a poster. `--ink` is a warm near-black (#2B1620, never pure
+ * black) so the surface reads as one warm object instead of black text
+ * dropped onto a tinted background. `--rose` carries white text at 7.8:1. One
+ * additional near-black magenta, `--caption`, exists for a single purpose:
+ * the two translation bars, which are the actual product this kiosk delivers,
+ * get the one dark, high-contrast, broadcast-caption treatment on the page —
+ * everything else stays quiet paper-on-pink around it.
+ *
+ * Rules (.claude/skills/deaf-kiosk-ux + REQUIREMENTS §4.6):
+ *   NFR-X1  nothing conveyed by sound alone — every state has a visible form
+ *   NFR-X2  reachable seated: controls in the lower two-thirds
+ *   NFR-X3  contrast >= 7:1, text sized for 1 m viewing — the requirement's
+ *           own floor, kept even though a touch kiosk is normally used much
+ *           closer (~50cm): a companion or someone still approaching may be
+ *           reading the screen from further back than whoever is signing.
+ *   NFR-X4  instructional content as sign video (placeholders until Phase 6)
+ */
+
+:root{
+  --blush:#fbe4ec;        /* page ground — a real light pink, not a tinted white */
+  --blush-deep:#f7cfdf;   /* banded sections */
+  --paper:#ffffff;        /* card surfaces — they carry the contrast now */
+  --ink:#2b1620;          /* 14.3:1 on blush — warm near-black */
+  --ink-soft:#5d3b48;     /*  8.0:1 on blush */
+  --rose:#a30a48;         /* white on rose = 7.8:1 */
+  --rose-mid:#d4477e;     /* decorative fills and rules only — too light for text */
+  --rose-soft:#fbd0e0;
+  --rose-line:#edb9cd;
+  --line:#e9c6d4;
+  --guide:#8a5a00;        /* guidance/uncertainty — not alarm red */
+  --guide-bg:#fdf0d8;
+  --danger:#a3131b;       /* genuine faults only */
+  /* The single dark surface on the page — reserved for the translation bars,
+     the actual output this kiosk exists to produce. High contrast with cream text. */
+  --caption:#3a0a20;
+  --caption-ink:#fce8f0;
+  /* Shadows carry the accent hue rather than neutral grey — a grey shadow on a
+     pink ground is what makes pastel palettes look washed out. */
+  --lift:0 10px 30px rgba(140,12,62,.13);
+  --lift-strong:0 16px 44px rgba(140,12,62,.20);
+
+  /* Type scale for ~1 m viewing. Nothing a visitor must read is below 19px. */
+  --t-hero:clamp(40px, 5vw, 68px);
+  --t-title:clamp(28px, 3.2vw, 44px);
+  --t-word:clamp(30px, 3.4vw, 46px);
+  --t-body:clamp(20px, 1.6vw, 26px);   /* 26px ≈ 6.3mm on this panel */
+  --t-small:clamp(18px, 1.25vw, 22px);
+  --t-label:clamp(13px, .95vw, 15px);
+
+  --tap:80px;   /* ≈ 19.4mm at this panel's ~105 PPI */
+  --font:"IBM Plex Sans Arabic","IBM Plex Sans",system-ui,"Segoe UI",Tahoma,sans-serif;
+  --display:"Cairo","IBM Plex Sans Arabic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+
+}
+
+*{box-sizing:border-box}
+button,.lang-card,.candidate-btn,.consent-row,.btn-speak{
+  touch-action:manipulation;-webkit-touch-callout:none;
+}
+html,body{height:100%}
+body{
+  margin:0;color:var(--ink);
+  /* Layered instead of flat: two soft, wide colour pools plus a faint vertical
+     drift. Every stop stays inside the blush family so text contrast against
+     it is unaffected — this is depth, not a second palette. */
+  background:
+    radial-gradient(52vw 52vw at 88% 6%, rgba(212,71,126,.16), transparent 62%),
+    radial-gradient(46vw 46vw at 6% 96%, rgba(163,10,72,.10), transparent 60%),
+    linear-gradient(180deg, #fdf2f6 0%, var(--blush) 42%, var(--blush-deep) 100%);
+  background-attachment:fixed;
+  font-family:var(--font);font-size:var(--t-body);line-height:1.5;font-weight:400;
+  overflow:hidden;user-select:none;-webkit-user-select:none;
+  -webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;
+}
+[hidden]{display:none!important}
+
+/* ── page mark ──────────────────────────────────────────────────────────────
+ * The wordmark used to live in its own fixed bar above every screen. It's
+ * merged into each screen's own header instead now — one less persistent
+ * chrome element competing with the content for the top of the screen.
+ */
+.page-mark{
+  font-family:var(--display);font-size:clamp(15px,1.3vw,18px);font-weight:600;
+  letter-spacing:.32em;text-indent:.32em;text-align:center;
+  color:var(--rose);margin:0 0 6px;text-transform:uppercase;
+}
+
+/* ── step dots ──────────────────────────────────────────────────────────────
+ * Replaces a wordmark eyebrow that used to repeat above every screen's
+ * heading — decoration with no information in it. Language → consent →
+ * capture genuinely is a fixed sequence (deaf-kiosk-ux: "one decision per
+ * screen"), so a progress marker earns its place here in a way a numbered
+ * 01/02/03 wouldn't on a page that isn't a sequence. The answer screen isn't
+ * part of this run — it's a response, reachable multiple times in a loop —
+ * so it carries no dots.
+ */
+.step-dots{display:flex;gap:10px;justify-content:center;margin:0 0 10px}
+.step-dot{width:9px;height:9px;border-radius:50%;background:var(--line)}
+.step-dot.is-done{background:var(--rose-mid)}
+.step-dot.is-current{background:var(--rose);width:22px;border-radius:5px}
+
+/* ── screen shell ───────────────────────────────────────────────────────── */
+.kview{
+  position:absolute;inset:0;
+  display:grid;grid-template-rows:auto minmax(0,1fr) auto;
+  gap:clamp(14px,2.2vh,30px);
+}
+.kview > *{padding-inline:clamp(22px,4vw,64px)}
+.kview header{padding-top:clamp(24px,4vh,52px)}
+.kview-title{
+  font-family:var(--display);font-size:calc(var(--t-title) * 1.08);font-weight:600;
+  margin:0;text-align:center;line-height:1.18;
+}
+.kview-sub{
+  margin:8px 0 0;font-size:var(--t-small);color:var(--ink-soft);text-align:center;font-weight:400;
+}
+
+/* ── buttons ─────────────────────────────────────────────────────────────────
+ * One size. There is deliberately no small button: correction controls are
+ * safety controls and must not be the hardest things on screen to hit.
+ */
+.btn{
+  font-family:var(--font);font-weight:500;font-size:var(--t-body);
+  min-height:var(--tap);padding:0 clamp(24px,2.6vw,42px);
+  border:2px solid transparent;border-radius:10px;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:12px;
+  transition:transform .06s ease,background .1s ease;
+}
+.btn:active:not(:disabled){transform:translateY(1px);transition-duration:.03s}
+.btn:disabled{opacity:.42;cursor:not-allowed}
+.btn:focus-visible{outline:3px solid var(--rose);outline-offset:3px}
+.btn-primary{
+  background:linear-gradient(180deg,#b81456,var(--rose) 55%);color:#fff;
+  box-shadow:0 3px 0 #7a0836,0 8px 18px rgba(140,12,62,.30);
+}
+.btn-primary:active:not(:disabled){box-shadow:0 1px 0 #7a0836,0 3px 8px rgba(140,12,62,.24)}
+.btn-ghost{background:var(--paper);color:var(--ink);border-color:var(--line)}
+.btn-quiet{background:transparent;color:var(--ink-soft);border-color:transparent;text-decoration:underline}
+.btn-huge{font-size:clamp(22px,2.1vw,28px);min-height:clamp(84px,10vh,104px);width:100%;max-width:560px}
+
+/* ── sign-clip placeholder ───────────────────────────────────────────────────
+ * NFR-X4 wants instruction as sign video; none is recorded until Phase 6. This
+ * reads as content that is coming, never as a broken element — and never as the
+ * raw "[placeholder]" string the earlier build showed the visitor.
+ */
+.signclip{
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  background:var(--paper);border:1px solid var(--rose-line);border-radius:12px;
+  padding:12px 16px;color:var(--ink-soft);font-size:var(--t-label);text-align:center;
+  box-shadow:var(--lift);
+}
+.signclip::before{
+  content:"\25B7";flex:none;width:26px;height:26px;border-radius:50%;
+  background:var(--rose-soft);color:var(--rose);font-size:.95em;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;text-indent:1px;
+}
+
+/* ── 0 · hello (the idle screen) ───────────────────────────────────────────
+ * Cursor:pointer on the whole section — this is the one screen an approaching
+ * visitor hasn't chosen to be at yet, so the entire surface is the target,
+ * same reasoning as the earlier attract screen this replaces.
+ */
+.kview-hello{cursor:pointer;display:grid;grid-template-rows:1fr;place-items:center;touch-action:manipulation}
+.hello-mid{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:clamp(10px,1.8vh,22px);text-align:center;
+}
+.hello-start{margin-top:clamp(8px,1.6vh,18px)}
+
+/* Kept in the render tree (not `display:none`, see index.html's comment) so
+   frame decoding for the motion check never pauses — clipped to nothing
+   visible instead. */
+.presence-sensor{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
+.presence-notice{
+  position:absolute;inset-inline:0;bottom:clamp(14px,2.4vh,26px);
+  text-align:center;font-size:var(--t-label);color:var(--ink-soft);opacity:.75;margin:0;
+}
+
+/* A flock, not a flourish: gliding through the empty margins above and below
+   the centred content, never across it, so it never competes with anything a
+   visitor has to read. Idle screen only — this is the one ambient touch on the
+   kiosk, same "spend it in one place" reasoning as the caption plates on the
+   capture screen. Reduced-motion visitors get the plain resting screen instead
+   of birds frozen mid-air, per the global media query at the end of this file. */
+.bird-flock{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+/* left:0 pinned explicitly — the page is dir="rtl", and with left/right both
+   auto an absolutely positioned element's static position anchors to the
+   *right* edge in RTL, not the left, which sent the translateX flight math
+   below off-screen entirely. */
+.bird{position:absolute;left:0;color:var(--rose);opacity:.65;will-change:transform}
+.bird-wing{display:block;width:100%;height:100%}
+.bird-1{top:6%; width:30px;height:18px;animation:fly-ltr 26s linear infinite;animation-delay:-4s}
+.bird-2{top:13%;width:22px;height:13px;animation:fly-rtl 34s linear infinite;animation-delay:-19s}
+.bird-3{top:21%;width:26px;height:16px;animation:fly-ltr 30s linear infinite;animation-delay:-11s}
+.bird-4{bottom:10%;width:24px;height:14px;animation:fly-rtl 28s linear infinite;animation-delay:-8s}
+.bird-5{bottom:18%;width:32px;height:19px;animation:fly-ltr 38s linear infinite;animation-delay:-27s}
+.bird .bird-wing{animation:flap .7s ease-in-out infinite}
+.bird-2 .bird-wing{animation-duration:.55s}
+.bird-4 .bird-wing{animation-duration:.62s}
+@keyframes fly-ltr{from{transform:translateX(-10vw)}to{transform:translateX(110vw)}}
+@keyframes fly-rtl{from{transform:translateX(110vw)}to{transform:translateX(-10vw)}}
+@keyframes flap{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.55)}}
+.hand-badge-hero{
+  width:clamp(130px,12vw,172px);height:clamp(130px,12vw,172px);
+  box-shadow:0 22px 56px rgba(140,12,62,.22), 0 0 0 10px rgba(255,255,255,.55),
+    inset 0 0 0 1px rgba(163,10,72,.16), inset 0 -3px 8px rgba(163,10,72,.12);
+}
+.hand-wave .lang-hand{transform-origin:50% 85%;animation:wave-hi 2.6s ease-in-out infinite}
+@keyframes wave-hi{
+  0%,16%,100%{transform:rotate(0deg)}
+  4%{transform:rotate(-16deg)}
+  8%{transform:rotate(12deg)}
+  12%{transform:rotate(-10deg)}
+}
+.hello-line{
+  font-family:var(--display);font-size:var(--t-hero);font-weight:700;
+  color:var(--rose);margin:0;line-height:1;
+}
+.page-mark-hello{margin:2px 0 0;text-align:center}
+.hello-sub{margin:0;font-size:var(--t-body);color:var(--ink-soft)}
+.hello-sub::after{
+  content:"";display:block;width:72px;height:3px;border-radius:2px;
+  margin:clamp(14px,2vh,22px) auto 0;
+  background:linear-gradient(90deg,transparent,var(--rose-mid),transparent);
+}
+/* ── 1 · language ──────────────────────────────────────────────────────────
+ * No longer the idle screen — the hello screen above is — so this one is
+ * reached only after a deliberate first touch, never sat on cold.
+ */
+.lang-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(min(212px,100%),1fr));
+  gap:clamp(12px,1.4vw,20px);align-content:center;
+}
+.lang-card{
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  background:var(--paper);border:1px solid var(--line);border-radius:14px;
+  padding:clamp(20px,2.6vh,34px) clamp(12px,1.4vw,20px);
+  cursor:pointer;color:var(--ink);font-family:var(--font);text-align:center;
+  min-height:clamp(250px,32vh,340px);justify-content:center;
+  box-shadow:var(--lift);position:relative;overflow:hidden;
+  transition:border-color .1s ease,box-shadow .1s ease,transform .09s ease;
+}
+/* A rose cap on the live card: colour where the choice actually is. */
+.lang-card:not(:disabled)::before{
+  content:"";position:absolute;inset-inline:0;top:0;height:5px;background:var(--rose);
+}
+@media (hover:hover) and (pointer:fine){
+  .lang-card:hover:not(:disabled){
+    border-color:var(--rose);box-shadow:var(--lift-strong);transform:translateY(-2px);
+  }
+}
+.lang-card:active:not(:disabled){
+  transform:translateY(1px) scale(.985);transition-duration:.04s;
+  border-color:var(--rose);box-shadow:var(--lift);
+}
+.lang-card:focus-visible{outline:3px solid var(--rose);outline-offset:3px}
+.lang-card:disabled{cursor:not-allowed;background:#fdf6f9;box-shadow:none}
+.lang-card:disabled .lang-name,.lang-card:disabled .lang-en{color:var(--ink-soft)}
+
+/* The hand glyph is generic to signing, not a claim about this language's own
+   signs — a flag would name a country instead of a language, and sign-language
+   boundaries are not national ones. (Flag emoji also render as bare letters on
+   Windows, which is how the previous build shipped "JO" and "AE".) */
+.hand-badge{
+  width:clamp(78px,7.4vw,104px);height:clamp(78px,7.4vw,104px);flex:none;
+  border-radius:50%;display:grid;place-items:center;
+  background:radial-gradient(120% 120% at 30% 22%, #ffe3ee, var(--rose-soft) 70%);
+  box-shadow:0 10px 24px rgba(140,12,62,.16),
+    inset 0 0 0 1px rgba(163,10,72,.16), inset 0 -3px 8px rgba(163,10,72,.12);
+}
+.lang-card:disabled .hand-badge{
+  background:radial-gradient(120% 120% at 30% 22%, #fdf3f6, #f6e2e9 70%);
+}
+.lang-hand{width:44%;height:auto;color:var(--rose);flex:none}
+.lang-card:disabled .lang-hand{opacity:.5}
+.lang-id{display:inline-flex;align-items:center;gap:8px}
+.lang-flag{
+  width:clamp(30px,2.6vw,40px);height:auto;border-radius:3px;flex:none;
+  box-shadow:0 0 0 1px rgba(43,22,32,.14),0 2px 6px rgba(43,22,32,.16);
+}
+.lang-card:disabled .lang-flag{filter:grayscale(.55) opacity(.7)}
+/* International Sign has no national flag — a stroked glyph, not a bordered
+   rectangle like the other eight cards' flags. */
+.lang-flag-globe{
+  box-shadow:none;border-radius:999px;color:var(--rose);background:none;
+  padding:2px;
+}
+.lang-code{
+  font-family:var(--mono);font-size:var(--t-label);font-weight:500;letter-spacing:.18em;
+  color:var(--rose);background:var(--rose-soft);border-radius:999px;padding:4px 14px;
+}
+.lang-name{font-size:clamp(21px,1.85vw,27px);font-weight:600;line-height:1.2}
+.lang-en{font-size:var(--t-label);color:var(--ink-soft);letter-spacing:.06em;text-transform:uppercase;line-height:1.3;margin-top:2px}
+.lang-soon{
+  font-size:var(--t-label);color:var(--ink-soft);border:1px solid var(--line);
+  border-radius:999px;padding:3px 12px;
+}
+
+/* ── 2 · consent ─────────────────────────────────────────────────────────────
+ * Kept, though the brief did not ask for it: the camera records body and face
+ * of an identifiable person, which is biometric data (REQUIREMENTS §6.1), so it
+ * cannot start without informed consent. Compressed to one light step instead
+ * of the full screen it used to be — required and optional consent, nothing else.
+ */
+.consent-wrap{display:flex;align-items:center;justify-content:center;overflow-y:auto}
+.consent-box{width:min(760px,100%);display:flex;flex-direction:column;gap:16px}
+.consent-what{
+  background:var(--paper);border:1px solid var(--line);border-radius:14px;
+  padding:clamp(16px,2.2vh,24px);font-size:var(--t-small);line-height:1.5;
+}
+.consent-what p{margin:0 0 10px}
+.consent-what p:last-child{margin:0}
+.consent-row{
+  display:flex;gap:16px;align-items:flex-start;cursor:pointer;
+  background:var(--paper);border:2px solid var(--line);border-radius:14px;
+  padding:clamp(15px,2vh,20px);font-size:var(--t-small);line-height:1.45;
+}
+.consent-row{transition:border-color .08s ease,background .08s ease,transform .05s ease}
+.consent-row:active{transform:scale(.99)}
+.consent-row:has(input:checked){border-color:var(--rose);background:#fffafc}
+.consent-row:focus-within{outline:3px solid var(--rose);outline-offset:2px}
+.consent-row input{width:34px;height:34px;flex:none;margin:0;accent-color:var(--rose);cursor:pointer}
+.consent-tag{font-family:var(--font);font-weight:600;font-size:var(--t-label);margin-inline-start:8px}
+.consent-tag.req{color:var(--rose)}
+.consent-tag.opt{color:var(--ink-soft)}
+.consent-fine{display:block;color:var(--ink-soft);margin-top:6px;font-size:var(--t-label)}
+
+/* ── 3 · capture ─────────────────────────────────────────────────────────────
+ * Camera box on top, the two translation bars directly beneath it. The preview
+ * is the largest element on the screen: it answers "does it see me?" instantly,
+ * in no language at all.
+ */
+.capture-stack{display:grid;grid-template-rows:minmax(0,1fr) auto;gap:clamp(12px,1.8vh,20px);min-height:0}
+.camera-wrap{
+  position:relative;min-height:0;background:#1b1016;
+  border:3px solid var(--rose-line);border-radius:14px;overflow:hidden;
+  box-shadow:var(--lift-strong);
+  display:grid;place-items:center;
+}
+#video,#overlay{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#video,#overlay{transform:scaleX(-1)}   /* a kiosk preview is a mirror */
+.cam-empty{text-align:center;color:#e9d6dd;padding:24px;z-index:2;font-size:var(--t-small)}
+.cam-empty.hidden{display:none}
+
+/* System state. "Watching" and "thinking" must be distinguishable at a glance —
+   if they are not, people re-sign mid-sign and corrupt the clip being captured. */
+.cam-state{
+  position:absolute;top:16px;inset-inline-start:16px;z-index:4;
+  display:inline-flex;align-items:center;gap:10px;padding:9px 18px;border-radius:999px;
+  font-size:var(--t-label);font-weight:500;letter-spacing:.02em;
+  background:rgba(255,255,255,.94);color:var(--ink);
+}
+.cam-state::before{content:"";width:11px;height:11px;border-radius:50%;background:var(--ink-soft);flex:none}
+.cam-state.is-watching::before{background:var(--rose);animation:breathe 2s ease-in-out infinite}
+.cam-state.is-thinking::before{background:var(--guide);border-radius:2px;animation:spin 1s linear infinite}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.rec-indicator{
+  position:absolute;top:16px;inset-inline-end:16px;z-index:4;
+  display:inline-flex;align-items:center;gap:10px;padding:9px 18px;border-radius:999px;
+  background:rgba(255,255,255,.94);color:var(--ink);font-size:var(--t-label);font-weight:500;
+}
+.rec-indicator::before{
+  content:"";width:12px;height:12px;border-radius:50%;background:var(--danger);
+  animation:breathe 1.4s ease-in-out infinite;flex:none;
+}
+
+/* Framing help guides, it does not alarm — amber, and it names the fix. */
+.framing-banner{
+  position:absolute;inset-inline:0;bottom:0;z-index:5;text-align:center;
+  background:var(--guide-bg);color:var(--guide);border-top:1px solid #e8cf9a;
+  font-weight:500;font-size:var(--t-small);padding:14px;
+}
+
+/* The two translation bars, Arabic and English, always both — a companion or
+   staff member may read only one of them, and the pairing is the point. */
+/* Two fixed columns, deliberately not auto-fit: on this 16:9 panel the two
+   translation bars always have room side by side (see TARGET DEVICE above). */
+/* Caption plates. This is the one dark, high-contrast surface on the whole
+   kiosk, and deliberately so: everything else here is paper-on-pink, quiet
+   and disciplined, so that the words the machine understood — the actual
+   product SIGNOO delivers — are unmistakably the loudest thing on screen.
+   Sharper corners than the paper cards (8px vs 14px) so this reads as a
+   caption plate, not another rounded card in the same kit. */
+.bars{display:grid;grid-template-columns:1fr 1fr;gap:clamp(10px,1.2vw,16px)}
+.bar{
+  background:var(--caption);color:var(--caption-ink);border-radius:8px;
+  border-top:3px solid var(--rose);
+  padding:clamp(13px,1.8vh,20px) clamp(16px,1.8vw,24px);
+  box-shadow:0 14px 34px rgba(20,4,8,.32);
+  display:flex;flex-direction:column;gap:6px;min-height:clamp(104px,13vh,140px);
+}
+.bar-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.bar-lang{
+  font-family:var(--font);font-weight:600;font-size:var(--t-label);letter-spacing:.03em;
+  color:#f0aecb;
+}
+.bar-text{margin:0;font-size:var(--t-word);font-weight:500;line-height:1.3;word-break:break-word}
+.bar-text.is-empty{color:rgba(252,232,240,.5);font-weight:400}
+.btn-speak{
+  min-height:54px;padding:0 18px;font-size:var(--t-label);font-weight:500;
+  background:transparent;color:var(--caption-ink);border:1px solid rgba(252,232,240,.35);
+  border-radius:10px;cursor:pointer;font-family:var(--font);flex:none;
+  transition:background .1s ease,border-color .1s ease;
+}
+.btn-speak:active{background:rgba(252,232,240,.15);border-color:rgba(252,232,240,.55)}
+@media (hover:hover) and (pointer:fine){
+  .btn-speak:hover{border-color:rgba(252,232,240,.6)}
+}
+
+/* Uncertainty (FR-K8): candidates as large targets, never a silent guess. */
+.candidates-box{
+  background:var(--guide-bg);border:2px solid #e8cf9a;border-radius:14px;
+  padding:clamp(13px,1.8vh,20px);
+}
+.candidates-hint{margin:0 0 12px;font-size:var(--t-small);font-weight:500;color:var(--guide)}
+.candidate-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:16px}
+.candidate-btn{
+  min-height:var(--tap);padding:12px 16px;font-size:var(--t-body);font-weight:500;
+  background:var(--paper);border:1px solid var(--line);border-radius:10px;
+  color:var(--ink);cursor:pointer;font-family:var(--font);
+  transition:border-color .08s ease,transform .06s ease;
+}
+.candidate-btn:active{transform:scale(.97)}
+@media (hover:hover) and (pointer:fine){
+  .candidate-btn:hover{border-color:var(--rose)}
+}
+.candidate-btn:focus-visible{outline:3px solid var(--rose);outline-offset:2px}
+
+/* A miss is a good outcome — better than a confident mistranslation. Guidance, not error. */
+.retry-banner{
+  background:var(--guide-bg);border:1px solid #e8cf9a;color:var(--guide);
+  border-radius:14px;padding:clamp(13px,1.8vh,18px);
+  font-size:var(--t-small);font-weight:500;text-align:center;
+}
+
+.kbar{display:flex;gap:clamp(16px,1.8vw,26px);align-items:center;justify-content:center;flex-wrap:wrap;
+  padding-bottom:clamp(18px,2.6vh,34px)}
+
+/* ── 4 · answer ─────────────────────────────────────────────────────────────
+ * What they said, what the system answers, and the answer signed back.
+ */
+.answer-scroll{overflow-y:auto;display:flex;flex-direction:column;gap:clamp(14px,2vh,22px);min-height:0}
+/* Text column plus a fixed-proportion avatar column — this 16:9 panel always
+   has the width for both (see TARGET DEVICE above); no narrow-viewport case
+   exists on this device for it to collapse into. */
+.answer-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.72fr);gap:clamp(16px,2vw,28px);align-items:start}
+
+/* "You said" is quoted back so the visitor can see whether the machine actually
+   understood them — glosses in sign-language order, not silently rewritten. */
+.said{
+  background:var(--blush-deep);border-inline-start:4px solid var(--rose);
+  border-radius:0 10px 10px 0;padding:clamp(14px,2vh,20px) clamp(16px,1.8vw,24px);
+}
+.said-label{font-family:var(--font);font-weight:600;font-size:var(--t-label);color:var(--rose)}
+.said-text{margin:6px 0 0;font-size:clamp(22px,2.1vw,30px);font-weight:500;line-height:1.35}
+
+.answer-block{background:var(--paper);border:1px solid var(--line);border-radius:14px;
+  padding:clamp(14px,2vh,22px) clamp(16px,1.8vw,24px);box-shadow:var(--lift)}
+.answer-block + .answer-block{margin-top:clamp(10px,1.4vh,16px)}
+.answer-text{margin:6px 0 0;font-size:clamp(21px,2vw,29px);font-weight:400;line-height:1.45}
+
+.answer-source{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:var(--font);font-size:var(--t-label);color:var(--ink-soft);
+}
+.answer-source::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--rose)}
+.answer-source.is-local::before{background:var(--guide)}
+
+/* Signed reply. The frame is real; what fills it is not decided by this file —
+   REQUIREMENTS §1.2 rules out a *generated* avatar for v1 (plausible-but-wrong
+   signing is actively harmful to someone relying on it) in favour of recorded
+   clips of real signers. Same slot either way. */
+.avatar-panel{
+  background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:var(--lift);
+  padding:clamp(14px,2vh,20px);display:flex;flex-direction:column;gap:12px;
+}
+.avatar-stage{
+  aspect-ratio:3/4;background:linear-gradient(165deg,#ffdcea,#f6bdd3);
+  border:1px dashed var(--rose-line);border-radius:14px;
+  display:grid;place-items:center;position:relative;overflow:hidden;
+}
+.avatar-figure{width:58%;height:auto;color:var(--rose);opacity:.85}
+/* Not the real signing character yet (signoo-avatar: retargeted motion only,
+   never generated) — this idle breathing loop just says "alive, waiting",
+   it performs no sign and claims none. */
+.avatar-stage-idle .avatar-figure{animation:avatar-breathe 3.6s ease-in-out infinite}
+@keyframes avatar-breathe{
+  0%,100%{transform:scale(1);opacity:.85}
+  50%{transform:scale(1.025);opacity:.95}
+}
+.avatar-cap{font-size:var(--t-label);color:var(--ink-soft);text-align:center;margin:0;line-height:1.4}
+.playback-row{display:flex;flex-wrap:wrap;gap:8px}
+.playback-word{
+  background:var(--blush);border:1px solid var(--line);border-radius:10px;
+  padding:8px 14px;font-size:var(--t-label);color:var(--ink-soft);
+  transition:background .09s ease,color .09s ease,border-color .09s ease;
+}
+.playback-word.is-current{background:var(--rose);border-color:var(--rose);color:#fff}
+
+.escalation-note{
+  background:var(--guide-bg);border:1px solid #e8cf9a;color:var(--guide);
+  border-radius:14px;padding:clamp(14px,2vh,20px);font-weight:500;
+  font-size:var(--t-small);text-align:center;
+}
+
+/* Its own full screen now (was a scroll-end block on the answer view) —
+   centred the same way .kview-hello is, since it's the other screen no one
+   is asked to do anything on. Auto-returns to hello; see app.js. */
+.kview-thankyou{display:grid;grid-template-rows:1fr;place-items:center}
+
+/* Thank-you sign-off, then the wordmark in mid rose. */
+.thanks{text-align:center;padding-top:clamp(6px,1.4vh,16px)}
+.thanks-line{margin:0;font-family:var(--display);font-size:clamp(28px,2.7vw,38px);font-weight:600;color:var(--ink)}
+.thanks-sub{margin:6px 0 0;font-size:var(--t-small);color:var(--ink-soft)}
+.thanks-mark{
+  margin:clamp(10px,1.6vh,20px) 0 0;font-size:clamp(26px,2.8vw,40px);font-weight:600;
+  letter-spacing:.42em;text-indent:.42em;color:var(--rose-mid);
+}
+
+/* ── idle countdown (FR-K13) ─────────────────────────────────────────────── */
+.idle-overlay{
+  position:fixed;inset:0;z-index:100;background:rgba(253,243,245,.97);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:clamp(14px,2.4vh,28px);text-align:center;padding:32px;
+  animation:fadeIn .12s ease both;
+}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.idle-overlay p{margin:0;font-family:var(--display);font-size:clamp(28px,2.7vw,38px);font-weight:600}
+.idle-countdown{
+  font-size:clamp(80px,12vw,160px)!important;font-weight:600;color:var(--rose);
+  line-height:1;font-variant-numeric:tabular-nums;
+}
+
+.toast{
+  position:fixed;bottom:28px;inset-inline-start:50%;transform:translateX(50%);
+  background:var(--ink);color:#fff;padding:16px 28px;border-radius:8px;
+  font-size:var(--t-small);z-index:200;max-width:min(720px,90vw);text-align:center;
+  box-shadow:0 12px 36px rgba(43,22,32,.28);
+}
+
+/* Screens arrive with one short move. Anything longer than this on a kiosk
+   reads as the machine being slow, not as polish. */
+.kview:not([hidden]){animation:rise .16s cubic-bezier(.22,.7,.3,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important}
+  .bird-flock{display:none}
+}

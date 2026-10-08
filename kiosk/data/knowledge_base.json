@@ -1,0 +1,24 @@
+[
+  {
+    "id": "1fa4fca0-cc90-4d1f-affd-1ff5fee12bf6",
+    "site_id": "default",
+    "keywords": [
+      "hours",
+      "افتتاح"
+    ],
+    "answer_ar": "نفتح من التاسعة حتى الخامسة.",
+    "answer_en": "We are open 9-5.",
+    "updated_at": "2026-09-04T00:03:26.150853"
+  },
+  {
+    "id": "ca5fc85f-36c7-4c6a-aa11-4c12a06d148e",
+    "site_id": "default",
+    "keywords": [
+      "hours",
+      "افتتاح"
+    ],
+    "answer_ar": "نفتح من التاسعة حتى الخامسة.",
+    "answer_en": "We are open 9-5.",
+    "updated_at": "2026-09-04T00:03:43.027939"
+  }
+]

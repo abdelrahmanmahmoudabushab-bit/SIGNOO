@@ -1,0 +1,13 @@
+{
+  "name": "signoo-kiosk-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron shell for the SIGNOO kiosk — wraps the existing browser frontend (index.html/assets/*.js, served by kiosk/main.py) as an installed, fullscreen kiosk app instead of a browser tab.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

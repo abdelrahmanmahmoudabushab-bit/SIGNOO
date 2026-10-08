@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from data import load_manifest
-from features import HAND_DIM, POSE_DIM
+from core.features import HAND_DIM, POSE_DIM
 
 MIN_CLIPS_PER_SIGN = 10
 MIN_SIGNERS_PER_SIGN = 3

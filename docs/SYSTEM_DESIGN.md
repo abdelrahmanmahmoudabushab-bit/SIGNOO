@@ -33,6 +33,24 @@ Three tiers, deliberately separated by what fails when the network does.
 depends on the server to serve a visitor. The server owns learning. A severed link
 degrades *improvement*, never *service*.
 
+### 1.1a The five blocks (plain-language view)
+
+The sixteen B-numbers below are the engineering-level breakdown; day to day, the system
+is five blocks. This grouping doesn't rename or renumber anything — every B-number
+below is still the unit of code, tests, and the comments that cite it.
+
+| # | Block | Does | B-numbers |
+|---|---|---|---|
+| 1 | **Presence & Capture** | notices a visitor, turns on the camera, produces landmarks | B1, B2, + presence/attract detection |
+| 2 | **Understanding** | turns the landmark stream into recognised words | B3, B4, B5 |
+| 3 | **Response** | speaks the result, answers questions, signs the answer back | B6, B7, B8 |
+| 4 | **Kiosk Experience** | the on-screen session itself; local data capture with consent | B9, B10, + UI flow |
+| 5 | **Learning Loop** | server + console: review, retrain, gate, roll out, admin | B11–B16 |
+
+Blocks 1–4 are entirely on-device and offline. Block 5 is the only one that needs the
+network — severing it degrades *improvement*, never *service* (§1's load-bearing
+decision, restated).
+
 ### 1.1 Contracts between blocks
 
 Every block takes and returns plain data — no camera handles, no model objects, no
@@ -128,11 +146,20 @@ ceiling.
 Transformer encoder over landmark sequences (see `docs/TRAINING.md`). One **shared
 backbone** with a **per-language head**, selected by the visitor's language choice.
 
-Rationale: the three sign languages differ in vocabulary but share the underlying
-structure of human signing — handshape, movement, spatial relationships. A shared
-backbone lets ASL's larger public data improve the LIU and ESL encoders, which is the
-single most valuable transfer available given LIU has no public dataset at all. Heads
-stay separate because the vocabularies are genuinely different languages, not dialects.
+Rationale: sign languages differ in vocabulary but share the underlying structure of
+human signing — handshape, movement, spatial relationships. A shared backbone lets
+ASL's larger public data improve encoders that start with little or no public data of
+their own. Heads stay separate because the vocabularies are genuinely different
+languages, not dialects.
+
+**Language packs (2026-10 revision).** The visitor-facing language menu now lists nine
+cards — Jordan (LIU), Saudi, UAE, Omani, Qatari, French (LSF), American (ASL), British
+(BSL), International Sign — each its own head, dataset, and signer-recruitment effort,
+not a caption-language toggle. Only a language with a real (non-synthetic) dataset and
+a trained head is enabled; every other card opens to an explicit "recording in
+progress" state rather than running an untrained or synthetic-only head live. Which
+language is recruited next, after LIU, is an open decision (`docs/ROADMAP.md`) — the
+architecture does not need that decision made to support the menu.
 
 Rejection is a first-class output: anything beyond the rejection threshold returns *no
 hypothesis*, and the UI asks the visitor to sign again. A confident mistranslation is
@@ -198,19 +225,41 @@ mode bolted on afterward, it is the always-available floor the cloud path sits a
 
 ### B8 — Sign playback
 
-**Does:** answer text → signed video.
+**Does:** answer text → a signing character on screen.
 
-**A recorded clip library, sequenced by word — not a generative avatar.** Generating
-grammatical sign language from text is an open research problem; a system that
-generates plausible-looking but wrong signing is actively harmful to the person relying
-on it. Recorded clips of real signers are correct by construction.
+**Still not a generative avatar — the safety reasoning that ruled that out stands.**
+Generating grammatical sign language from text is an open research problem; a system
+that generates plausible-looking but wrong signing is actively harmful to a Deaf
+visitor relying on it for correct information, with no way to detect the error. That
+conclusion doesn't change with this revision.
 
-Cost, stated plainly: every word in every answer must be recorded, per language.
-Coverage is a content problem, and the console warns when knowledge-base text contains
-words the library cannot render (FR-W7).
+**What changes (2026-10 revision): retargeted motion instead of flat video clips.**
+Each word's library entry is no longer a video file — it is the same landmark sequence
+`kiosk/data_capture.py` (B10) already records from a real signer, retargeted onto a
+single persistent 3D rigged character (face, body, two hands) instead of played back
+as that signer's own video. Every individual sign is still a real recording, played
+back faithfully — correct by construction, same guarantee as the clip-library design —
+but the visitor sees one consistent character regardless of which real signer
+contributed which word, and sequences blend between words instead of cutting between
+clips. This reuses B10's existing capture pipeline and `core/features.py`'s landmark
+representation; the new work is the retargeting (landmarks → rig) and the renderer, not
+a new capture or recognition system.
 
-Playback highlights each word as its clip plays, tying the signed and written answer
-together.
+Cost, stated plainly: every word in every answer must still be recorded from a real
+signer, per language — recording a landmark sequence is cheaper than filming a clean
+video take, but the coverage problem (every word needed) is unchanged. The console
+still warns when knowledge-base text contains words with no recorded sequence (FR-W7).
+
+Playback highlights each word as it plays, tying the signed and written answer
+together, same as before.
+
+**Open engineering question, not yet resolved:** the retargeting step (mapping a real
+signer's hand/body landmarks onto a rig that was not their own body) is nontrivial —
+proportions differ per signer, and getting it wrong reintroduces exactly the
+"plausible but wrong" risk this design otherwise avoids. Treat the first retargeting
+attempt as a spike with an explicit correctness check (a Deaf reviewer confirms the
+retargeted playback still reads as the right sign) before it is trusted for any word
+shown live.
 
 ### B9 — Session and telemetry
 
@@ -222,6 +271,35 @@ stage, frame rate, temperature, throttle state, memory, and interaction outcomes
 
 Temperature and throttling are logged specifically because a kiosk slowing down in
 August is otherwise indistinguishable from a software regression.
+
+**Visitor-facing flow (2026-10 revision).** The state machine gains two states and the
+`active` state gains an internal split; this is a UI/flow change on top of the
+existing blocks, not a new block:
+
+```
+attract (presence auto-detected, no tap-to-start)
+   → hi (greeting)
+   → language (card grid, one card per language pack — §B4 "Language packs";
+      unready packs open to "recording in progress", not a live session)
+   → consent
+   → active:translate (self-view camera box; two live caption boxes — the visitor's
+      chosen language and English — fed by the existing B1→B6 pipeline, unchanged)
+   → [visitor presses "Next"] → active:ask (B7 question → B8's signing character +
+      a synced text box, replacing the old single "answer" screen)
+   → thank_you
+   → attract (reset, NFR-S3 erasure unchanged)
+```
+
+**Presence detection (`attract`) is new engineering, not yet built.** Today the kiosk
+only turns the camera on when a visitor explicitly starts a session (`getUserMedia` on
+button press); nothing watches the idle screen for an approaching visitor. Candidate
+approaches: a low-fps face/person detector on the same camera feed used for B2 (cheapest,
+no new hardware, but means the camera is always live, which needs its own
+privacy-review sentence since today's design assumes the camera is off until consent);
+or a dedicated presence sensor (PIR/ultrasonic/radar) gating when the camera turns on at
+all (more hardware, cleaner privacy story — camera stays off until someone is actually
+there). Pick one in Phase 2 alongside the Jetson bring-up; it is a camera/sensor
+decision, not a model decision, so it does not block on any language's dataset.
 
 ### B10 — Data capture
 

@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 
-from features import normalise_frame, resample
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.features import normalise_frame, resample
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 

@@ -6,6 +6,7 @@ split**. Everything here is built to make violating that rule difficult.
 from __future__ import annotations
 
 import json
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,8 @@ from pathlib import Path
 import numpy as np
 from torch.utils.data import Dataset
 
-from features import SEQ_LEN, add_velocity, mirror
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from core.features import SEQ_LEN, add_velocity, mirror
 
 
 @dataclass

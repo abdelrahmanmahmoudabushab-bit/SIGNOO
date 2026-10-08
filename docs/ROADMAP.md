@@ -9,6 +9,40 @@ stops.
 
 ---
 
+## Current state vs. this plan (as of 2026-10-07)
+
+The phasing below assumes each phase's code is written *after* its predecessor's exit
+criteria are met. In practice, engineering got ahead of the gates: the kiosk runtime
+(B1–B10), the server backend (B11–B16), and the console admin UI were all scaffolded
+and partly implemented before Phase 1's data-collection exit criteria were satisfied.
+This is not necessarily wrong — a solo/small team can't literally pause coding while
+waiting on signer recruitment — but it means the gates below are **unmet**, not
+**pending-because-not-started**:
+
+- `kiosk/` — B1–B10 implemented, 16 unit tests passing (mocked perception; not yet run
+  hot on a Jetson). **Untracked in git** (`?? kiosk/`) — never committed.
+- `server/` — B11–B16 implemented (FastAPI, Alembic migrations, promotion gate, 7 test
+  files). Committed in `915a165`. **28/28 tests passing** (confirmed 2026-10-08, via
+  `server/.venv`).
+- `console/` — React/TS admin UI implemented, 17 tests passing. `electron/`'s
+  `npm install` also confirmed working (70 packages, electron 33.4.11 resolved).
+  Both **untracked in git** (`?? console/`, `?? electron/`) — never committed.
+- `core/features.py` / `core/contracts.py` — shared between kiosk and `ml/`, committed.
+- **No real signer data exists.** `data/` contains only `synthetic/`. `models/signoo.pt`
+  is trained on synthetic data, not real LIU recordings. Phase 0's exit criteria
+  (perception sustains 30 fps hot on Jetson, ≥5 signers committed, consent pack
+  approved) and Phase 1's (50 signs × 10 signers × 5 reps, ≥85% signer-independent) are
+  both **not yet met** — the single biggest gap between this document and reality.
+- A browser-only single-signer prototype (`index.html`, `assets/*.js`) still exists at
+  the repo root, separate from `kiosk/`, and is mid-refactor (`assets/recognizer.js`
+  and `ml/features.py` deleted in favor of the shared `core/features.py`).
+
+**Implication:** the code is substantially ahead of the data. The next two weeks
+should close that gap — see "Next two weeks" below — rather than add more block
+implementations.
+
+---
+
 ## Phasing principle
 
 Each phase ends with a **decision point**, not a demo. If the exit criteria are not met,
@@ -222,6 +256,64 @@ gated phase now, not an indefinitely deferred nice-to-have.)
 | R9 | Privacy/regulatory blocker | Deployment blocked | Legal review in Phase 0, per jurisdiction, before any collection |
 | R10 | Self-training degrades models | Silent quality collapse | Frozen human-verified benchmark the training cannot touch; shadow run; automatic rollback |
 | R11 | Public-site abuse or misuse | Reputational | Escalation paths; no medical/legal/emergency use; visible uncertainty |
+
+---
+
+## Next two weeks (concrete, as of 2026-10-07)
+
+Given the gap above, the next two weeks are about closing it, not writing more block
+code:
+
+**Week 1 — land what's already built, prove it runs**
+- Commit `kiosk/`, `console/`, and `electron/` (currently untracked) so they aren't one
+  `git clean` away from being lost
+- Reconcile the uncommitted `assets/` + `ml/features.py` → `core/features.py` refactor;
+  finish it, run `ml/compare_splits.py` to confirm the shared feature code still
+  reproduces the signer-independent-split behavior described in the README
+- ~~Install `server/requirements.txt`...~~ **Done 2026-10-08**: `server/.venv` already
+  had everything needed — 28/28 tests pass. The earlier "missing dependency" was the
+  wrong venv being used, not an actual gap.
+- Jetson bring-up: JetPack + TensorRT + camera, run the perception spike, measure fps
+  hot — this is Phase 0's one unresolved hardware exit criterion
+
+**Week 2 — start the real dataset, the actual blocker**
+- Finalize and get legal review on the consent pack (Arabic/English/sign video)
+- Recruit and commit the first signers — target is ≥5 by week 2 close, matching Phase
+  0's exit criterion; pursue the institutional-partnership route (R1/R3) in parallel
+  since it's the only path that supplies both signers and reviewers at once
+- Record the first real sessions with the (already-built) recording studio and run
+  them through the (already-built) `ml/` pipeline, end to end, on real — not
+  synthetic — data, even at small volume
+- Decide, with real numbers in hand, whether 50 signs × 10 signers × 5 reps (Phase 1's
+  target) is reachable on the current recruitment pace, and adjust the Phase 1 estimate
+  accordingly rather than carrying the ~6-week guess unchanged
+
+**Parallel track — kiosk UX/flow rebuild (blocks on nothing above)**
+
+Per the 2026-10-07 revision to `docs/SYSTEM_DESIGN.md` §2 (B4, B8, B9), the visitor
+flow is being rebuilt to: auto-detected presence → hi → a nine-card language menu
+(only LIU live; the rest "recording in progress") → consent → a translate screen
+(self-view + dual-language captions) → an "ask" screen (B8's retargeted-motion signing
+character + text) → thank-you → reset. None of this depends on new signer data, so it
+runs alongside Weeks 1–2 rather than after them:
+- Pick and prototype the presence-detection approach (camera-based low-fps face
+  detection vs. a dedicated PIR/ultrasonic sensor) — a hardware/privacy decision, not a
+  model decision
+- Build the language-pack card grid UI with per-language "ready" vs. "recording in
+  progress" state, wired to `core/vocab.json`/config rather than hardcoded
+- Split the single `active` screen into `translate` (self-view + two caption boxes)
+  and `ask` (avatar + text), with the "Next" transition between them
+- Add `hi` and `thank_you` states to `kiosk/session.py`'s state machine and their
+  screens
+- Spike the B8 retargeting pipeline (recorded landmarks → 3D rig) on whatever landmark
+  data exists today (synthetic is fine for proving the pipeline, same caveat as
+  `kiosk/tests/test_smoke_pipeline.py`) — the goal this spike is pipeline wiring, not a
+  correct sign, and it must not be trusted live until a Deaf reviewer confirms
+  retargeted output per `SYSTEM_DESIGN.md` B8's open question
+
+Two weeks does not clear Phase 1's accuracy gate — it is aimed at making sure the
+*data pipeline* (consent → recording → ingest → training) has been exercised once on
+a real signer before committing to a longer collection push.
 
 ---
 

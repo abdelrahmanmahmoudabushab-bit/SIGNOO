@@ -2,188 +2,432 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SIGNOO — مترجم لغة الإشارة الأردنية</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SIGNOO</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9C%8B%3C/text%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/styles.css">
+<!-- No Google Fonts CDN link here on purpose: this is an app meant to work
+     offline (electron/README.md, docs/TECH_STACK.md), and a kiosk booting with
+     no network has no business spending its startup waiting on a doomed
+     connection to fonts.googleapis.com. kiosk.css's --font/--display/--mono
+     stacks already fall back to solid system fonts (system-ui, Segoe UI,
+     IBM Plex if actually installed, etc.) — self-hosting the real Cairo/IBM
+     Plex Arabic font files is the real fix for the branded look, not done
+     here (needs the binary font files vendored, same as vendor/models/ for
+     the perception model; stated as a gap, not hidden). -->
+<!-- kiosk.css is self-contained. assets/styles.css is the old desktop-MVP sheet,
+     still used by record.html, whose type scale is wrong at 1 m. -->
+<link rel="stylesheet" href="assets/kiosk.css">
 </head>
 <body>
 
-<header class="topbar">
-  <div class="brand">
-    <span class="logo" aria-hidden="true">✋</span>
-    <div>
-      <h1>SIGNOO</h1>
-      <p>مترجم لغة الإشارة الأردنية · Jordanian Sign Language Translator</p>
+<!-- Hand glyph, defined once and referenced by each language card. Generic to
+     signing rather than a claim about any one language's signs. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="glyph-hand" viewBox="0 0 64 72">
+    <g fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 40V14a5 5 0 0 1 10 0v22"/>
+      <path d="M30 36V9a5 5 0 0 1 10 0v27"/>
+      <path d="M40 37V15a5 5 0 0 1 10 0v29"/>
+      <path d="M50 44V26a5 5 0 0 1 10 0v20c0 14-9 24-22 24S16 62 12 52l-7-14a5 5 0 0 1 8-6l7 9"/>
+    </g>
+  </symbol>
+
+  <!-- One wingbeat away from the hand glyph in spirit: a message carried between
+       two people. Purely decorative (hello-flock, idle screen only). -->
+  <symbol id="glyph-bird" viewBox="0 0 24 14">
+    <path d="M1 11c4-8 8-8 11-2 3-6 7-6 11 2" fill="none" stroke="currentColor"
+      stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+
+  <symbol id="flag-jo" viewBox="0 0 60 40">
+    <rect width="60" height="40" fill="#fff"/>
+    <rect width="60" height="13.33" fill="#000"/>
+    <rect y="26.67" width="60" height="13.33" fill="#007a3d"/>
+    <path d="M0 0 26 20 0 40Z" fill="#ce1126"/>
+    <g fill="#fff">
+      <path d="M9 20l1.76-1.28-.67 2.07 1.76 1.28-2.18 0-.67 2.07-.67-2.07-2.18 0 1.76-1.28-.67-2.07z"/>
+    </g>
+  </symbol>
+  <symbol id="flag-ae" viewBox="0 0 60 40">
+    <rect width="60" height="40" fill="#fff"/>
+    <rect width="60" height="13.33" fill="#00732f"/>
+    <rect y="13.33" width="60" height="13.33" fill="#fff"/>
+    <rect y="26.67" width="60" height="13.33" fill="#000"/>
+    <rect width="16" height="40" fill="#ff0000"/>
+  </symbol>
+  <symbol id="flag-sa" viewBox="0 0 60 40">
+    <rect width="60" height="40" fill="#0a5c36"/>
+    <g fill="#fff">
+      <rect x="12" y="24" width="36" height="2.6" rx="1.3"/>
+      <path d="M46 20.5c1.6 0 3.4.9 3.4 2.4 0 .6-.3 1.1-.8 1.5-.9-.7-2-1.1-2.6-1.1-1 0-1.6.5-1.6 1.1 0 1.3 4.6 1 4.6 3.9 0 1.8-1.9 3-4.3 3-1.9 0-3.6-.8-4.4-2l1.4-1c.6.8 1.7 1.3 2.9 1.3 1.2 0 2-.5 2-1.2 0-1.4-4.6-1-4.6-3.9 0-1.7 1.7-2.9 3.9-3z"/>
+    </g>
+  </symbol>
+  <symbol id="flag-us" viewBox="0 0 60 40">
+    <rect width="60" height="40" fill="#fff"/>
+    <g fill="#b31942">
+      <rect y="0" width="60" height="3.08"/><rect y="6.15" width="60" height="3.08"/>
+      <rect y="12.3" width="60" height="3.08"/><rect y="18.46" width="60" height="3.08"/>
+      <rect y="24.6" width="60" height="3.08"/><rect y="30.77" width="60" height="3.08"/>
+      <rect y="36.9" width="60" height="3.08"/>
+    </g>
+    <rect width="26" height="21.5" fill="#0a3161"/>
+    <g fill="#fff">
+      <circle cx="4" cy="3.5" r=".9"/><circle cx="9" cy="3.5" r=".9"/><circle cx="14" cy="3.5" r=".9"/><circle cx="19" cy="3.5" r=".9"/>
+      <circle cx="6.5" cy="7.5" r=".9"/><circle cx="11.5" cy="7.5" r=".9"/><circle cx="16.5" cy="7.5" r=".9"/><circle cx="21.5" cy="7.5" r=".9"/>
+      <circle cx="4" cy="11.5" r=".9"/><circle cx="9" cy="11.5" r=".9"/><circle cx="14" cy="11.5" r=".9"/><circle cx="19" cy="11.5" r=".9"/>
+      <circle cx="6.5" cy="15.5" r=".9"/><circle cx="11.5" cy="15.5" r=".9"/><circle cx="16.5" cy="15.5" r=".9"/><circle cx="21.5" cy="15.5" r=".9"/>
+    </g>
+  </symbol>
+  <symbol id="flag-fr" viewBox="0 0 60 40">
+    <rect width="20" height="40" fill="#0055a4"/>
+    <rect x="20" width="20" height="40" fill="#fff"/>
+    <rect x="40" width="20" height="40" fill="#ef4135"/>
+  </symbol>
+  <symbol id="flag-gb" viewBox="0 0 60 40">
+    <rect width="60" height="40" fill="#00247d"/>
+    <path d="M0 0 60 40M60 0 0 40" stroke="#fff" stroke-width="8"/>
+    <path d="M0 0 60 40M60 0 0 40" stroke="#cf142b" stroke-width="3"/>
+    <path d="M30 0v40M0 20h60" stroke="#fff" stroke-width="13"/>
+    <path d="M30 0v40M0 20h60" stroke="#cf142b" stroke-width="7.5"/>
+  </symbol>
+  <symbol id="flag-om" viewBox="0 0 60 40">
+    <rect width="60" height="40" fill="#fff"/>
+    <rect y="13.33" width="60" height="13.33" fill="#db161b"/>
+    <rect y="26.67" width="60" height="13.33" fill="#008000"/>
+    <rect width="18" height="40" fill="#db161b"/>
+  </symbol>
+  <symbol id="flag-qa" viewBox="0 0 60 40">
+    <rect width="60" height="40" fill="#8a1538"/>
+    <rect width="16" height="40" fill="#fff"/>
+    <path d="M16 0l6 4-6 4 6 4-6 4 6 4-6 4 6 4-6 4 6 4-6 4V0z" fill="#fff"/>
+  </symbol>
+  <symbol id="glyph-globe" viewBox="0 0 24 24">
+    <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9.5"/>
+      <path d="M2.5 12h19M12 2.5c3 3 4.5 6.3 4.5 9.5s-1.5 6.5-4.5 9.5c-3-3-4.5-6.3-4.5-9.5S9 5.5 12 2.5z"/>
+    </g>
+  </symbol>
+</svg>
+
+<!-- ═══════════ 0 · hello (the idle screen) ═══════════
+     One touch on anything here moves to language selection. This is what an
+     idle kiosk rests on, and what a visitor who timed out returns to — nothing
+     from a previous session should ever be visible past this point (NFR-S3). -->
+<section id="view-hello" class="kview kview-hello">
+  <!-- Presence auto-detect (signoo-avatar/jetson-realtime pattern: boring choice
+       first): a low-res camera sample feeds a frame-difference motion heuristic in
+       app.js. Not a preview — visually hidden via .presence-sensor, NOT the `hidden`
+       attribute, because several browser engines pause video decoding on a
+       display:none element, which would starve the motion check of real frames.
+       Tapping anywhere on this screen still works as an explicit fallback
+       (deaf-kiosk-ux: never make an automatic feature the only way in). -->
+  <video id="presenceVideo" class="presence-sensor" playsinline muted aria-hidden="true"></video>
+
+  <!-- deaf-kiosk-ux: "ask before the camera starts" — auto-detect means the
+       camera is on before any consent screen, which this line discloses
+       honestly rather than hiding. Nothing from this camera is ever sent or
+       stored (app.js's presence code never calls send()); the actual
+       recognition camera still waits for the consent screen, unchanged. -->
+  <p class="presence-notice">👁 نراقب لنقول مرحبًا — لا شيء يُسجَّل أو يُرسَل · <span dir="ltr">Watching to say hello — nothing is recorded or sent</span></p>
+
+  <div class="bird-flock" aria-hidden="true">
+    <span class="bird bird-1"><svg class="bird-wing"><use href="#glyph-bird"/></svg></span>
+    <span class="bird bird-2"><svg class="bird-wing"><use href="#glyph-bird"/></svg></span>
+    <span class="bird bird-3"><svg class="bird-wing"><use href="#glyph-bird"/></svg></span>
+    <span class="bird bird-4"><svg class="bird-wing"><use href="#glyph-bird"/></svg></span>
+    <span class="bird bird-5"><svg class="bird-wing"><use href="#glyph-bird"/></svg></span>
+  </div>
+  <div class="hello-mid">
+    <span class="hand-badge hand-badge-hero hand-wave"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+    <p class="hello-line">مرحبا</p>
+    <p class="page-mark page-mark-hello">SIGNOO</p>
+    <p class="hello-sub" dir="ltr">Hello — SIGNOO reads sign language</p>
+    <button id="btnHelloStart" class="btn btn-primary btn-huge hello-start">
+      المس الشاشة للبدء · <span dir="ltr">Touch to start</span>
+    </button>
+  </div>
+</section>
+
+<!-- ═══════════ 1 · language ═══════════ -->
+<section id="view-language" class="kview" hidden>
+  <header>
+    <div class="step-dots" aria-hidden="true">
+      <span class="step-dot is-current"></span>
+      <span class="step-dot"></span>
+      <span class="step-dot"></span>
+    </div>
+    <h2 class="kview-title">اختر لغة الإشارة</h2>
+    <p class="kview-sub" dir="ltr">Choose your sign language</p>
+  </header>
+
+  <div class="lang-grid">
+    <button class="lang-card" data-lang="liu">
+      <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+      <span class="lang-name">الأردنية</span>
+      <span class="lang-id"><svg class="lang-flag" viewBox="0 0 60 40" aria-hidden="true"><use href="#flag-jo"/></svg><span class="lang-code" dir="ltr">LIU</span></span>
+      <span class="lang-en" dir="ltr">Jordanian</span>
+      <span class="signclip">الاسم بالإشارة</span>
+    </button>
+
+    <button class="lang-card" data-lang="esl" disabled>
+      <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+      <span class="lang-name">الإماراتية</span>
+      <span class="lang-id"><svg class="lang-flag" viewBox="0 0 60 40" aria-hidden="true"><use href="#flag-ae"/></svg><span class="lang-code" dir="ltr">ESL</span></span>
+      <span class="lang-en" dir="ltr">Emirati</span>
+      <span class="lang-soon">قريبًا</span>
+    </button>
+
+    <button class="lang-card" data-lang="ssl" disabled>
+      <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+      <span class="lang-name">السعودية</span>
+      <span class="lang-id"><svg class="lang-flag" viewBox="0 0 60 40" aria-hidden="true"><use href="#flag-sa"/></svg><span class="lang-code" dir="ltr">SSL</span></span>
+      <span class="lang-en" dir="ltr">Saudi</span>
+      <span class="lang-soon">قريبًا</span>
+    </button>
+
+    <button class="lang-card" data-lang="asl" disabled>
+      <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+      <span class="lang-name">الأمريكية</span>
+      <span class="lang-id"><svg class="lang-flag" viewBox="0 0 60 40" aria-hidden="true"><use href="#flag-us"/></svg><span class="lang-code" dir="ltr">ASL</span></span>
+      <span class="lang-en" dir="ltr">American</span>
+      <span class="lang-soon">قريبًا</span>
+    </button>
+
+    <button class="lang-card" data-lang="lsf" disabled>
+      <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+      <span class="lang-name">الفرنسية</span>
+      <span class="lang-id"><svg class="lang-flag" viewBox="0 0 60 40" aria-hidden="true"><use href="#flag-fr"/></svg><span class="lang-code" dir="ltr">LSF</span></span>
+      <span class="lang-en" dir="ltr">French</span>
+      <span class="lang-soon">قريبًا</span>
+    </button>
+
+    <button class="lang-card" data-lang="bsl" disabled>
+      <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+      <span class="lang-name">البريطانية</span>
+      <span class="lang-id"><svg class="lang-flag" viewBox="0 0 60 40" aria-hidden="true"><use href="#flag-gb"/></svg><span class="lang-code" dir="ltr">BSL</span></span>
+      <span class="lang-en" dir="ltr">British</span>
+      <span class="lang-soon">قريبًا</span>
+    </button>
+
+    <button class="lang-card" data-lang="omsl" disabled>
+      <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+      <span class="lang-name">العُمانية</span>
+      <span class="lang-id"><svg class="lang-flag" viewBox="0 0 60 40" aria-hidden="true"><use href="#flag-om"/></svg><span class="lang-code" dir="ltr">OM</span></span>
+      <span class="lang-en" dir="ltr">Omani</span>
+      <span class="lang-soon">قريبًا</span>
+    </button>
+
+    <button class="lang-card" data-lang="qsl" disabled>
+      <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+      <span class="lang-name">القطرية</span>
+      <span class="lang-id"><svg class="lang-flag" viewBox="0 0 60 40" aria-hidden="true"><use href="#flag-qa"/></svg><span class="lang-code" dir="ltr">QA</span></span>
+      <span class="lang-en" dir="ltr">Qatari</span>
+      <span class="lang-soon">قريبًا</span>
+    </button>
+
+    <button class="lang-card" data-lang="is" disabled>
+      <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
+      <span class="lang-name">العالمية</span>
+      <span class="lang-id"><svg class="lang-flag lang-flag-globe" viewBox="0 0 24 24" aria-hidden="true"><use href="#glyph-globe"/></svg><span class="lang-code" dir="ltr">IS</span></span>
+      <span class="lang-en" dir="ltr">International Sign</span>
+      <span class="lang-soon">قريبًا</span>
+    </button>
+  </div>
+
+  <div class="kbar"></div>
+</section>
+
+<!-- ═══════════ 2 · consent ═══════════
+     Not in the brief, but the camera captures body and face of an identifiable
+     person — biometric data under REQUIREMENTS §6.1, so it cannot start without
+     informed consent. Compressed to one light step: required, optional, go. -->
+<section id="view-consent" class="kview" hidden>
+  <header>
+    <div class="step-dots" aria-hidden="true">
+      <span class="step-dot is-done"></span>
+      <span class="step-dot is-current"></span>
+      <span class="step-dot"></span>
+    </div>
+    <h2 class="kview-title">قبل تشغيل الكاميرا</h2>
+    <p class="kview-sub" dir="ltr">Before the camera starts</p>
+  </header>
+
+  <div class="consent-wrap">
+    <div class="consent-box">
+      <div class="signclip" style="min-height:64px">شرح الموافقة بلغة الإشارة · <span dir="ltr">consent, signed</span></div>
+
+      <div class="consent-what">
+        <p id="consentWhatNative"><b>ماذا نسجّل؟</b> نقاط تتبّع اليدين والجسم فقط — لا يُحفظ الفيديو ولا صورة وجهك، ولا يغادر شيء هذا الجهاز.</p>
+        <p id="consentWhatEn" dir="ltr"><b>What do we capture?</b> Only hand and body tracking points. No video, no image of your face,
+          and nothing leaves this device.</p>
+      </div>
+
+      <label class="consent-row">
+        <input type="checkbox" id="chkConsentProcessing">
+        <span>
+          <b id="consentProcessingNative">معالجة إشارتي لعرض الترجمة والإجابة</b><span class="consent-tag req">مطلوب</span><br>
+          <span id="consentProcessingEn" dir="ltr">Process my signing to show a translation and an answer</span>
+        </span>
+      </label>
+
+      <label class="consent-row">
+        <input type="checkbox" id="chkConsentRetention">
+        <span>
+          <b id="consentRetentionNative">حفظ نقاط هذه الجلسة لتحسين النظام</b><span class="consent-tag opt">اختياري</span><br>
+          <span id="consentRetentionEn" dir="ltr">Keep this session's tracking points to improve the system</span>
+          <span class="consent-fine">الرفض لا يغيّر شيئًا · <span dir="ltr">Declining changes nothing.</span></span>
+        </span>
+      </label>
     </div>
   </div>
-  <nav class="tabs" role="tablist">
-    <button class="tab is-active" role="tab" data-view="translate">الترجمة</button>
-    <button class="tab" role="tab" data-view="train">تعليم الإشارات</button>
-    <button class="tab" role="tab" data-view="data">البيانات</button>
-    <a class="tab" href="record.html">استوديو التسجيل ←</a>
-  </nav>
-</header>
 
-<main>
-  <!-- ═══════════ camera column (shared by translate + train) ═══════════ -->
-  <section class="stage" id="stage">
+  <div class="kbar">
+    <button id="btnConsentContinue" class="btn btn-primary btn-huge" disabled>
+      ابدأ · <span dir="ltr">Start</span>
+    </button>
+  </div>
+</section>
+
+<!-- ═══════════ 3 · capture ═══════════
+     Camera box, then the two translation bars directly beneath it. -->
+<section id="view-capture" class="kview" hidden>
+  <header>
+    <div class="step-dots" aria-hidden="true">
+      <span class="step-dot is-done"></span>
+      <span class="step-dot is-done"></span>
+      <span class="step-dot is-current"></span>
+    </div>
+    <h2 class="kview-title">أشِر الآن</h2>
+    <p class="kview-sub" dir="ltr">Sign now — your words appear below</p>
+  </header>
+
+  <div class="capture-stack">
     <div class="camera-wrap">
       <video id="video" playsinline muted></video>
       <canvas id="overlay"></canvas>
 
-      <div class="cam-badge" id="camBadge">الكاميرا متوقفة</div>
-      <div class="countdown" id="countdown" hidden></div>
+      <div class="cam-state" id="camState">الكاميرا متوقفة</div>
+      <div class="rec-indicator" id="recIndicator" hidden>يُحفظ · <span dir="ltr">saving</span></div>
+      <div class="framing-banner" id="framingBanner" hidden></div>
 
-      <div class="cam-empty" id="camEmpty">
-        <p class="cam-empty-icon" aria-hidden="true">📷</p>
-        <p>اضغط «تشغيل الكاميرا» للبدء</p>
-        <p class="muted">كل المعالجة تتم على جهازك — لا يتم رفع أي فيديو.</p>
-      </div>
+      <div class="cam-empty" id="camEmpty"><p>جارٍ تشغيل الكاميرا…</p></div>
     </div>
 
-    <div class="cam-controls">
-      <button id="btnCamera" class="btn btn-primary">تشغيل الكاميرا</button>
-      <label class="switch">
-        <input type="checkbox" id="chkMirror" checked>
-        <span>عكس الصورة (مرآة)</span>
-      </label>
-      <label class="switch">
-        <input type="checkbox" id="chkSkeleton" checked>
-        <span>إظهار نقاط اليد</span>
-      </label>
-      <span class="hands-readout" id="handsReadout">لا توجد يد</span>
-    </div>
-  </section>
-
-  <!-- ═══════════ translate view ═══════════ -->
-  <section class="panel" id="view-translate">
-    <div class="panel-head">
-      <h2>الترجمة المباشرة</h2>
-      <button id="btnTranslate" class="btn btn-primary" disabled>بدء الترجمة</button>
-    </div>
-
-    <div class="meter" id="liveMeter">
-      <div class="meter-label">
-        <span id="liveLabel">—</span>
-        <span id="liveConf">0%</span>
-      </div>
-      <div class="meter-track"><div class="meter-fill" id="liveFill"></div></div>
-    </div>
-
-    <div class="output">
-      <div class="out-block">
-        <div class="out-head">
-          <h3>العربية</h3>
-          <button class="btn btn-ghost btn-sm" data-speak="ar">🔊 نطق</button>
+    <div class="bars">
+      <div class="bar">
+        <div class="bar-head">
+          <span class="bar-lang" id="barLabelPrimary">العربية</span>
+          <button class="btn-speak" id="btnSpeakAr">نطق</button>
         </div>
-        <p class="out-text" id="outAr" dir="rtl" lang="ar">…</p>
+        <p class="bar-text is-empty" id="outAr" dir="rtl" lang="ar">…</p>
       </div>
-      <div class="out-block">
-        <div class="out-head">
-          <h3>English</h3>
-          <button class="btn btn-ghost btn-sm" data-speak="en">🔊 Speak</button>
+      <div class="bar">
+        <div class="bar-head">
+          <span class="bar-lang" dir="ltr">English</span>
+          <button class="btn-speak" id="btnSpeakEn" dir="ltr">Speak</button>
         </div>
-        <p class="out-text" id="outEn" dir="ltr" lang="en">…</p>
+        <p class="bar-text is-empty" id="outEn" dir="ltr" lang="en">…</p>
       </div>
     </div>
 
-    <div class="out-actions">
-      <button id="btnClear" class="btn btn-ghost btn-sm">مسح الجملة</button>
-      <button id="btnBackspace" class="btn btn-ghost btn-sm">حذف آخر كلمة</button>
-      <button id="btnCopy" class="btn btn-ghost btn-sm">نسخ</button>
-      <label class="switch">
-        <input type="checkbox" id="chkAutoSpeak">
-        <span>نطق تلقائي</span>
-      </label>
+    <div id="candidatesBox" class="candidates-box" hidden>
+      <p class="candidates-hint">اختر ما تقصده · <span dir="ltr">Pick what you meant</span></p>
+      <div class="candidate-grid" id="candidateGrid"></div>
     </div>
 
-    <details class="tuning">
-      <summary>إعدادات الحساسية</summary>
-      <label class="range">
-        <span>حد الثقة <b id="valConf">70%</b></span>
-        <input type="range" id="rngConf" min="30" max="95" value="70">
-      </label>
-      <label class="range">
-        <span>الثبات المطلوب <b id="valStable">3</b> إطارات</span>
-        <input type="range" id="rngStable" min="1" max="8" value="3">
-      </label>
-      <label class="range">
-        <span>الفاصل بين الكلمات <b id="valCooldown">1.0</b> ثانية</span>
-        <input type="range" id="rngCooldown" min="2" max="30" value="10">
-      </label>
-    </details>
-
-    <p class="hint" id="translateHint"></p>
-  </section>
-
-  <!-- ═══════════ train view ═══════════ -->
-  <section class="panel" id="view-train" hidden>
-    <div class="panel-head">
-      <h2>تعليم الإشارات</h2>
+    <div id="retryBanner" class="retry-banner" hidden>
+      لم أفهم تلك الإشارة — جرّب مرة أخرى ·
+      <span dir="ltr">I didn't catch that — please sign again</span>
     </div>
-    <p class="hint">
-      اختر كلمة، ثم سجّل الإشارة عدة مرات (٥ مرات أو أكثر أفضل). نوّع قليلاً في السرعة
-      والمسافة عن الكاميرا حتى يتعلّم البرنامج الإشارة بشكل أدق.
-    </p>
+  </div>
 
-    <div class="train-grid">
-      <label class="field">
-        <span>الكلمة</span>
-        <select id="selWord"></select>
-      </label>
-      <label class="field">
-        <span>مدة التسجيل</span>
-        <select id="selDuration">
-          <option value="900">قصيرة — 0.9 ث (إشارة ثابتة)</option>
-          <option value="1500" selected>متوسطة — 1.5 ث</option>
-          <option value="2200">طويلة — 2.2 ث (حركة كاملة)</option>
-        </select>
-      </label>
-    </div>
+  <div class="kbar">
+    <button id="btnBackspace" class="btn btn-ghost">احذف كلمة</button>
+    <button id="btnClear" class="btn btn-ghost">مسح</button>
+    <button id="btnAsk" class="btn btn-primary">أرسل · <span dir="ltr">Send</span></button>
+    <button id="btnEndSession" class="btn btn-quiet">إنهاء</button>
+  </div>
+</section>
 
-    <div class="train-actions">
-      <button id="btnRecord" class="btn btn-primary" disabled>تسجيل عيّنة</button>
-      <span class="sample-count" id="sampleCount">٠ عيّنات لهذه الكلمة</span>
-    </div>
+<!-- ═══════════ 4 · answer ═══════════
+     What they said, the answer in both languages, and the answer signed back. -->
+<section id="view-answer" class="kview" hidden>
+  <header>
+    <h2 class="kview-title">الإجابة</h2>
+    <p class="kview-sub"><span class="answer-source" id="answerSource"></span></p>
+  </header>
 
-    <div class="new-word">
-      <h3>إضافة كلمة جديدة</h3>
-      <div class="train-grid">
-        <label class="field"><span>بالعربية</span><input id="newAr" type="text" placeholder="مثال: صباح الخير" dir="rtl"></label>
-        <label class="field"><span>بالإنجليزية</span><input id="newEn" type="text" placeholder="e.g. good morning" dir="ltr"></label>
+  <div class="answer-scroll">
+    <div class="answer-grid">
+      <div>
+        <div class="said">
+          <span class="said-label" dir="ltr">You signed</span>
+          <p class="said-text" id="saidText">…</p>
+        </div>
+
+        <div class="answer-block">
+          <span class="bar-lang" id="answerLabelPrimary">العربية</span>
+          <p class="answer-text" id="answerAr" dir="rtl" lang="ar">…</p>
+        </div>
+        <div class="answer-block">
+          <span class="bar-lang" dir="ltr">English</span>
+          <p class="answer-text" id="answerEn" dir="ltr" lang="en">…</p>
+        </div>
+
+        <div id="escalationNote" class="escalation-note" hidden>
+          هذا السؤال يحتاج مساعدة موظف · <span dir="ltr">This question needs a staff member's help</span>
+        </div>
       </div>
-      <button id="btnAddWord" class="btn btn-ghost btn-sm">إضافة الكلمة</button>
-    </div>
-  </section>
 
-  <!-- ═══════════ data view ═══════════ -->
-  <section class="panel" id="view-data" hidden>
-    <div class="panel-head">
-      <h2>البيانات المحفوظة</h2>
+      <div class="avatar-panel">
+        <div class="avatar-stage avatar-stage-idle">
+          <svg class="avatar-figure" viewBox="0 0 120 160" aria-hidden="true">
+            <g fill="currentColor" opacity=".13">
+              <ellipse cx="60" cy="140" rx="40" ry="8"/>
+            </g>
+            <g fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M42 92c0-22 8-34 18-34s18 12 18 34" fill="currentColor" fill-opacity=".08"/>
+              <circle cx="60" cy="32" r="19" fill="currentColor" fill-opacity=".1"/>
+              <path d="M60 51v20"/>
+              <path d="M60 96c-14 0-24 9-24 24v18h48v-18c0-15-10-24-24-24z" fill="currentColor" fill-opacity=".08"/>
+              <path d="M60 71c-9 0-15-7-18-14"/>
+              <path d="M42 57c-3-5-3-11 0-15" stroke-linecap="round"/>
+              <path d="M60 71c10 0 17-9 19-19"/>
+              <circle cx="80" cy="49" r="3.4" fill="currentColor" stroke="none"/>
+            </g>
+          </svg>
+        </div>
+        <p class="avatar-cap">الإجابة بلغة الإشارة · <span dir="ltr">Answer, signed back</span></p>
+        <div class="playback-row" id="playbackRow"></div>
+      </div>
     </div>
-    <p class="hint">
-      البيانات محفوظة داخل متصفحك فقط. صدّرها إلى ملف لحفظ نسخة احتياطية أو لمشاركتها
-      مع جهاز آخر.
-    </p>
-    <div class="train-actions">
-      <button id="btnExport" class="btn btn-ghost btn-sm">تصدير إلى ملف</button>
-      <button id="btnImport" class="btn btn-ghost btn-sm">استيراد من ملف</button>
-      <button id="btnReset" class="btn btn-danger btn-sm">حذف كل البيانات</button>
-      <input type="file" id="fileImport" accept="application/json" hidden>
-    </div>
-    <div class="stats" id="stats"></div>
-    <table class="table" id="wordTable">
-      <thead><tr><th>الكلمة</th><th>English</th><th>العيّنات</th><th></th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </section>
-</main>
+  </div>
 
-<div class="toast" id="toast" hidden></div>
+  <div class="kbar">
+    <button id="btnBackToCapture" class="btn btn-ghost">اسأل مرة أخرى · <span dir="ltr">Ask again</span></button>
+    <button id="btnEndSessionFromAnswer" class="btn btn-primary">إنهاء · <span dir="ltr">Finish</span></button>
+  </div>
+</section>
+
+<!-- ═══════════ 5 · thank-you ═══════════
+     Its own screen, reached after "Finish" (or an idle-triggered reset) and
+     auto-returning to hello (NFR-S3: nothing of this visitor's session should
+     linger once the kiosk is idle again, including this screen). -->
+<section id="view-thankyou" class="kview kview-thankyou" hidden>
+  <div class="thanks">
+    <p class="thanks-line">شكرًا لك</p>
+    <p class="thanks-sub" dir="ltr">Thank you for using SIGNOO</p>
+    <p class="thanks-mark">SIGNOO</p>
+  </div>
+</section>
+
+<div id="idleOverlay" class="idle-overlay" hidden>
+  <p>هل ما زلت هنا؟<br><span dir="ltr">Are you still there?</span></p>
+  <p class="idle-countdown" id="idleCountdown">١٠</p>
+  <button id="btnIdleExtend" class="btn btn-primary btn-huge">نعم، تابع · <span dir="ltr">Yes, continue</span></button>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <script type="module" src="assets/app.js"></script>
 </body>

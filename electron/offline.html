@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SIGNOO</title>
+<!-- Loaded by electron/main.js whenever /health isn't answering — on first
+     launch before the backend is up, or if it ever dies mid-session. Not a
+     generic browser error page: same visual language as the kiosk itself
+     (reuses kiosk.css), and states plainly what's wrong, per
+     signoo-engineering's "an honest gap is useful; a claim of 'should work'
+     is not." main.js polls in the background and swaps this out for the real
+     app automatically the moment /health answers — no restart needed. -->
+<link rel="stylesheet" href="../assets/kiosk.css">
+<style>
+  body{margin:0;background:var(--base,#fdf3f5)}
+  .offline-wrap{
+    position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:16px;text-align:center;padding:32px;
+  }
+  .offline-mark{font-size:clamp(26px,2.8vw,40px);font-weight:600;letter-spacing:.42em;
+    text-indent:.42em;color:var(--rose-mid,#a30a48)}
+  .offline-line{margin:0;font-family:var(--display);font-size:clamp(20px,2.2vw,28px);
+    font-weight:600;color:var(--ink,#2b1620)}
+  .offline-sub{margin:0;font-size:var(--t-small,14px);color:var(--ink-soft,#5d3b48)}
+  .offline-dots span{animation:offline-pulse 1.4s ease-in-out infinite}
+  .offline-dots span:nth-child(2){animation-delay:.2s}
+  .offline-dots span:nth-child(3){animation-delay:.4s}
+  @keyframes offline-pulse{0%,100%{opacity:.25}50%{opacity:1}}
+</style>
+</head>
+<body>
+  <div class="offline-wrap">
+    <p class="offline-mark">SIGNOO</p>
+    <p class="offline-line">الخادم غير متاح الآن</p>
+    <p class="offline-line" dir="ltr">Starting up — not reachable yet</p>
+    <p class="offline-sub" dir="ltr">Retrying automatically every few seconds. No action needed.</p>
+    <p class="offline-dots" aria-hidden="true"><span>●</span> <span>●</span> <span>●</span></p>
+  </div>
+</body>
+</html>

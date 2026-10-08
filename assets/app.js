@@ -1,58 +1,70 @@
-// SIGNOO — camera-based Jordanian Sign Language translator.
+// SIGNOO kiosk frontend — the visitor flow (docs/REQUIREMENTS.md FR-K1-K14).
 //
-// Flow: camera → MediaPipe hand landmarks → feature vector → nearest-neighbour
-// match against signs the user recorded → Arabic + English text.
+// Camera capture and rendering stay in the browser; every processed frame is sent
+// to the kiosk/ FastAPI backend over a WebSocket as a base64 JPEG, and perception
+// (MediaPipe Holistic), segmentation, recognition, assembly, dialogue and sign
+// playback all happen server-side — see kiosk/main.py's module docstring for the
+// full wire-protocol reference. This file only owns screens, the camera, drawing,
+// and turning WebSocket messages into what the visitor sees.
 
-import { HandTracker, drawHands, clearCanvas } from './vision.js';
-import { Recognizer, frameFeature, sequenceFeature, hasHands, FEATURE_DIM } from './recognizer.js';
-import { loadState, saveState, exportFile, importFile } from './store.js';
-import { STARTER_WORDS } from './vocab.js';
+import { drawLandmarks, clearCanvas } from './vision.js';
 
-// ── tuning constants ────────────────────────────────────────────────────────
-const BUFFER_MS        = 2600;  // rolling landmark history kept for matching
-const CLASSIFY_EVERY   = 140;   // how often live matching runs
-const MATCH_WINDOW_MS  = 1500;  // slice of history compared against samples
-const MIN_SAMPLES_WORD = 3;     // recordings needed before a word is usable
-const REC_COUNTDOWN    = 3;
-
-const $  = sel => document.querySelector(sel);
-const el = {
-  video: $('#video'), overlay: $('#overlay'), camEmpty: $('#camEmpty'),
-  camBadge: $('#camBadge'), countdown: $('#countdown'), handsReadout: $('#handsReadout'),
-  btnCamera: $('#btnCamera'), chkMirror: $('#chkMirror'), chkSkeleton: $('#chkSkeleton'),
-  btnTranslate: $('#btnTranslate'), liveLabel: $('#liveLabel'), liveConf: $('#liveConf'),
-  liveFill: $('#liveFill'), outAr: $('#outAr'), outEn: $('#outEn'),
-  chkAutoSpeak: $('#chkAutoSpeak'), translateHint: $('#translateHint'),
-  selWord: $('#selWord'), selDuration: $('#selDuration'), btnRecord: $('#btnRecord'),
-  sampleCount: $('#sampleCount'), newAr: $('#newAr'), newEn: $('#newEn'),
-  stats: $('#stats'), wordTable: $('#wordTable'), fileImport: $('#fileImport'),
-  toast: $('#toast'),
+const $ = sel => document.querySelector(sel);
+const views = {
+  hello: $('#view-hello'), language: $('#view-language'), consent: $('#view-consent'),
+  capture: $('#view-capture'), answer: $('#view-answer'), thankyou: $('#view-thankyou'),
 };
 
-// ── application state ───────────────────────────────────────────────────────
-const state = { words: [], samples: [] };
+const el = {
+  video: $('#video'), overlay: $('#overlay'), camEmpty: $('#camEmpty'),
+  camState: $('#camState'), recIndicator: $('#recIndicator'),
+  framingBanner: $('#framingBanner'),
+  saidText: $('#saidText'),
+  candidatesBox: $('#candidatesBox'), candidateGrid: $('#candidateGrid'),
+  retryBanner: $('#retryBanner'),
+  outAr: $('#outAr'), outEn: $('#outEn'),
+  barLabelPrimary: $('#barLabelPrimary'), answerLabelPrimary: $('#answerLabelPrimary'),
+  answerAr: $('#answerAr'), answerEn: $('#answerEn'), answerSource: $('#answerSource'),
+  escalationNote: $('#escalationNote'), playbackRow: $('#playbackRow'),
+  idleOverlay: $('#idleOverlay'), idleCountdown: $('#idleCountdown'),
+  toast: $('#toast'), presenceVideo: $('#presenceVideo'),
+};
 
-const tracker    = new HandTracker();
-const recognizer = new Recognizer();
+// FR-K13: idle countdown, inactivity, and a "one touch" full reset all funnel
+// through showView('hello') + resetSessionUI(), so the next visitor never sees
+// anything left over (NFR-S3).
+function showView(name) {
+  for (const [key, node] of Object.entries(views)) node.hidden = key !== name;
+}
 
-let stream = null;
-let running = false;
-let translating = false;
-let recording = null;                       // { frames, until } while capturing
+// Arabic-Indic digits wherever a number sits in Arabic text (deaf-kiosk-ux:
+// "use Arabic-Indic digits where the surrounding Arabic text uses them").
+const arNum = n => Number(n).toLocaleString('ar-EG');
 
-const buffer = [];                          // { t, f } rolling landmark history
-const sentence = { ar: [], en: [] };
+// NFR-X1: the system's state is always visible, and "watching" must be
+// distinguishable from "thinking" at a glance — if it isn't, people re-sign
+// mid-sign and corrupt the very clip being captured.
+//
+// `thinking` is currently only set around an explicit ask (question -> answer).
+// A true per-utterance "recognising" state needs the backend to emit a signal at
+// the B3 segmentation boundary before B4 returns; that is a backend-phase item,
+// so it is left honestly absent rather than faked with a timer here.
+function setCamState(state) {
+  const text = {
+    off: 'الكاميرا متوقفة · <span dir="ltr">camera off</span>',
+    watching: 'أراك · <span dir="ltr">I can see you</span>',
+    thinking: 'أفكّر… · <span dir="ltr">thinking…</span>',
+  }[state];
+  el.camState.className = `cam-state${state === 'off' ? '' : ` is-${state}`}`;
+  el.camState.innerHTML = text;
+}
 
-let lastClassifyAt = 0;
-let streakLabel = null, streakCount = 0;
-let lastEmit = { label: null, at: 0 };
-
-const settings = { confidence: 0.70, stability: 3, cooldown: 1000 };
-
-// ── helpers ─────────────────────────────────────────────────────────────────
-const arNum = n => n.toLocaleString('ar-EG');
-const wordById = id => state.words.find(w => w.id === id);
-const samplesFor = id => state.samples.filter(s => s.label === id).length;
+// A translation bar shows either real text or a resting placeholder — never an
+// empty box, which reads as "broken" rather than "nothing signed yet".
+function setBar(node, text) {
+  node.textContent = text || '…';
+  node.classList.toggle('is-empty', !text);
+}
 
 let toastTimer;
 function toast(msg) {
@@ -62,407 +74,434 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.toast.hidden = true; }, 2600);
 }
 
-function speak(text, lang) {
-  if (!text || !window.speechSynthesis) return;
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = lang === 'ar' ? 'ar-SA' : 'en-US';
-  speechSynthesis.cancel();
-  speechSynthesis.speak(u);
-}
-
-/** Words with enough recordings to be recognised. */
-function trainableWords() {
-  return state.words.filter(w => samplesFor(w.id) >= MIN_SAMPLES_WORD);
-}
-
-function refit() {
-  const usable = new Set(trainableWords().map(w => w.id));
-  recognizer.fit(state.samples.filter(s => usable.has(s.label)));
-
-  const ready = usable.size >= 2;
-  el.btnTranslate.disabled = !ready || !running;
-
-  el.translateHint.textContent = ready
-    ? `جاهز للترجمة · ${arNum(usable.size)} كلمة مُدرَّبة.`
-    : `تحتاج إلى كلمتين على الأقل، لكل واحدة ${arNum(MIN_SAMPLES_WORD)} تسجيلات، `
-      + `من تبويب «تعليم الإشارات». (${arNum(usable.size)} جاهزة الآن)`;
-
-  if (!ready && translating) stopTranslating();
-}
-
-const persist = () => saveState({ words: state.words, samples: state.samples });
-
-// ── camera ──────────────────────────────────────────────────────────────────
-async function startCamera() {
-  el.btnCamera.disabled = true;
-  el.btnCamera.textContent = 'جارٍ التحميل…';
+// ── vocabulary (single source of truth: core/vocab.json, per docs/API_CONTRACTS.md §1) ──
+let vocab = new Map();
+async function loadVocab() {
   try {
-    await tracker.load();
+    const res = await fetch('/core/vocab.json');
+    const entries = await res.json();
+    vocab = new Map(entries.map(e => [e.id, e]));
+  } catch {
+    vocab = new Map();   // candidate buttons fall back to showing the raw gloss id
+  }
+}
+
+// ── language metadata & localisation ──────────────────────────────────────────
+// The chosen language's own name/script drives the consent screen and the
+// "your language" caption bar. Only `liu` has real translated consent copy
+// today (the rest are disabled cards per docs/ROADMAP.md's "one language
+// end-to-end" rule — signoo-language-scaling skill); every other code falls
+// back to the existing bilingual AR/EN copy rather than showing nothing,
+// flagged here so it isn't mistaken for a finished translation.
+const CONSENT_TEXT = {
+  liu: {
+    whatNative: '<b>ماذا نسجّل؟</b> نقاط تتبّع اليدين والجسم فقط — لا يُحفظ الفيديو ولا صورة وجهك، ولا يغادر شيء هذا الجهاز.',
+    processingNative: 'معالجة إشارتي لعرض الترجمة والإجابة',
+    retentionNative: 'حفظ نقاط هذه الجلسة لتحسين النظام',
+  },
+  // TODO(signoo-language-scaling): real per-language consent translations,
+  // once that language's card is live. Falls back to the liu/AR copy until then.
+};
+
+function nativeLabelFor(langCode) {
+  const card = document.querySelector(`.lang-card[data-lang="${langCode}"] .lang-name`);
+  return card ? card.textContent : 'العربية';
+}
+
+// FR-K2 extended: once a second language ships, its consent and caption-bar
+// labels should read in its own language, not always Arabic (deaf-kiosk-ux:
+// "written Arabic is not automatically accessible" generalises to every
+// language here, not just English speakers).
+function applyLanguageLocale(langCode) {
+  const native = nativeLabelFor(langCode);
+  el.barLabelPrimary.textContent = native;
+  el.answerLabelPrimary.textContent = native;
+
+  const copy = CONSENT_TEXT[langCode] || CONSENT_TEXT.liu;
+  $('#consentWhatNative').innerHTML = copy.whatNative;
+  $('#consentProcessingNative').textContent = copy.processingNative;
+  $('#consentRetentionNative').textContent = copy.retentionNative;
+}
+
+// ── WebSocket ────────────────────────────────────────────────────────────────
+let ws = null;
+let wsReady = false;
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/session`);
+  ws.onopen = () => { wsReady = true; };
+  ws.onclose = () => { wsReady = false; toast('انقطع الاتصال بالخادم — أعد تحميل الصفحة. / Connection lost — reload the page.'); };
+  ws.onerror = () => { wsReady = false; };
+  ws.onmessage = ev => handleMessage(JSON.parse(ev.data));
+}
+
+function send(message) {
+  if (wsReady) ws.send(JSON.stringify(message));
+}
+
+function handleMessage(msg) {
+  switch (msg.type) {
+    case 'state': break;   // server-side session state; UI already drives the flow
+    case 'landmarks':
+      if (el.overlay.dataset.skeletonOn === '1') drawLandmarks(el.overlay, el.video, msg);
+      break;
+    case 'framing':
+      el.framingBanner.hidden = msg.ok !== false;
+      if (!el.framingBanner.hidden) {
+        el.framingBanner.textContent = msg.reason === 'no_body'
+          ? 'الجسم غير مرئي — تراجع قليلًا · Body not detected — step back a little'
+          : 'لا تظهر اليدان بوضوح · Hands not clearly visible';
+      }
+      break;
+    case 'hypothesis': onHypothesis(msg); break;
+    case 'rendered':
+      setBar(el.outAr, msg.ar);
+      setBar(el.outEn, msg.en);
+      break;
+    case 'tts_done': break;   // text was already shown before this ever arrives
+    case 'answer': onAnswer(msg); break;
+    case 'playback': onPlayback(msg.words); break;
+    case 'idle_warning': onIdleWarning(msg.seconds_left); break;
+    case 'session_reset': onSessionReset(); break;
+    case 'error': toast(msg.message || msg.code); break;
+    default: break;
+  }
+}
+
+function onHypothesis(msg) {
+  el.candidatesBox.hidden = true;
+  el.retryBanner.hidden = true;
+
+  if (msg.status === 'committed') {
+    // Committed words land in the two translation bars via the 'rendered'
+    // message; nothing extra to show here.
+  } else if (msg.status === 'candidates') {
+    // FR-K8: below-threshold candidates are large touch targets, never a silent guess.
+    el.candidatesBox.hidden = false;
+    el.candidateGrid.innerHTML = '';
+    for (const [glossId] of msg.alternatives) {
+      const entry = vocab.get(glossId);
+      const btn = document.createElement('button');
+      btn.className = 'candidate-btn';
+      btn.textContent = entry ? `${entry.ar} / ${entry.en}` : glossId;
+      btn.onclick = () => {
+        send({ type: 'select_candidate', gloss_id: glossId });
+        el.candidatesBox.hidden = true;
+      };
+      el.candidateGrid.append(btn);
+    }
+  } else if (msg.status === 'rejected') {
+    el.retryBanner.hidden = false;
+  }
+}
+
+function onAnswer(msg) {
+  setCamState(stream ? 'watching' : 'off');   // question answered, back to watching
+  // Show the visitor what the machine thought they signed, in sign-language
+  // order — they need to see whether it understood them, not just its reply.
+  el.saidText.textContent = el.outAr.textContent || '…';
+  showView('answer');
+  el.answerAr.textContent = msg.ar;
+  el.answerEn.textContent = msg.en;
+  el.escalationNote.hidden = !msg.refused;
+  // NFR-P3b: the cloud/local-fallback switch must be seamless to the visitor —
+  // no retry button, no error — but Answer.source is still shown, quietly, per
+  // core/contracts.py's own comment on why the flag exists.
+  el.answerSource.className = `answer-source${msg.source === 'local_fallback' ? ' is-local' : ''}`;
+  el.answerSource.textContent = msg.source === 'local_fallback'
+    ? 'إجابة محلية · Local answer'
+    : 'إجابة سحابية · Cloud answer';
+}
+
+let playbackTimer = null;
+
+function onPlayback(words) {
+  // Without this, asking a second question before the first answer's
+  // playback finished cycling left the old interval running indefinitely on
+  // now-detached nodes — harmless to look at (nothing visible references
+  // them), but a real leak, and it would eventually run on two independent
+  // timers if this happened more than once.
+  clearInterval(playbackTimer);
+  el.playbackRow.innerHTML = '';
+  const nodes = words.map(w => {
+    const box = document.createElement('div');
+    box.className = 'playback-word';
+    box.textContent = w.ar;
+    box.title = w.has_clip ? w.en : `${w.en} — لم تُسجَّل بعد`;
+    el.playbackRow.append(box);
+    return box;
+  });
+  // B8: "highlights each word as its clip plays" — with no real clips yet, the
+  // highlight still sequences at a fixed cadence so the mechanism is visible and
+  // testable, per docs/SYSTEM_DESIGN.md B8 / models/README.md's stated gap.
+  let i = 0;
+  playbackTimer = setInterval(() => {
+    nodes.forEach(n => n.classList.remove('is-current'));
+    if (i >= nodes.length) { clearInterval(playbackTimer); return; }
+    nodes[i].classList.add('is-current');
+    i += 1;
+  }, 700);
+}
+
+function onIdleWarning(secondsLeft) {
+  el.idleOverlay.hidden = false;
+  el.idleCountdown.textContent = arNum(secondsLeft);
+}
+
+// NFR-S3: someone who walks away has consented to nothing — the next visitor
+// must never see any trace of the previous conversation.
+function onSessionReset() {
+  el.idleOverlay.hidden = true;
+  stopCamera();
+  setBar(el.outAr, '');
+  setBar(el.outEn, '');
+  el.saidText.textContent = '…';
+  el.candidatesBox.hidden = true;
+  el.candidateGrid.innerHTML = '';
+  el.retryBanner.hidden = true;
+  el.framingBanner.hidden = true;
+  el.recIndicator.hidden = true;
+  el.answerAr.textContent = el.answerEn.textContent = '…';
+  clearInterval(playbackTimer);
+  el.playbackRow.innerHTML = '';
+  el.escalationNote.hidden = true;
+  $('#chkConsentProcessing').checked = false;
+  $('#chkConsentRetention').checked = false;
+  $('#btnConsentContinue').disabled = true;
+  selectedLang = null;
+
+  // Say goodbye before resetting to idle — covers both the explicit "Finish"
+  // button and an idle-timeout-triggered reset; either way the next visitor
+  // must land on a clean hello screen, never mid-thank-you (NFR-S3).
+  showView('thankyou');
+  clearTimeout(thankyouTimer);
+  thankyouTimer = setTimeout(enterHello, THANKYOU_DISPLAY_MS);
+}
+
+// ── camera (FR-K4) ───────────────────────────────────────────────────────────
+let stream = null;
+let frameTimer = null;
+const FRAME_INTERVAL_MS = 130;   // ~7.5 fps over the wire — plenty for pause-based
+                                  // segmentation (SYSTEM_DESIGN.md B3), far below
+                                  // the 60fps capture budget that matters on-device.
+const sendCanvas = document.createElement('canvas');
+
+async function startCamera() {
+  try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: 'user' },
     });
     el.video.srcObject = stream;
     await el.video.play();
-
-    running = true;
+    el.overlay.dataset.skeletonOn = '1';
     el.camEmpty.classList.add('hidden');
-    el.camBadge.textContent = 'الكاميرا تعمل';
-    el.camBadge.className = 'cam-badge live';
-    el.btnCamera.textContent = 'إيقاف الكاميرا';
-    el.btnRecord.disabled = false;
-    refit();
-    requestAnimationFrame(loop);
+    setCamState('watching');
+
+    frameTimer = setInterval(sendFrame, FRAME_INTERVAL_MS);
   } catch (err) {
-    // Distinguish "no internet for the tracker" from "camera refused" — they look
-    // the same to the user but need completely different fixes.
     const messages = {
-      LIB_UNAVAILABLE:   'تعذّر تحميل نظام تتبّع اليد. تحقّق من الاتصال بالإنترنت، '
-                       + 'أو شغّل scripts/fetch-vendor.sh للعمل بدون إنترنت.',
-      MODEL_UNAVAILABLE: 'تعذّر تحميل ملف النموذج. تحقّق من الاتصال بالإنترنت، '
-                       + 'أو شغّل scripts/fetch-vendor.sh للعمل بدون إنترنت.',
-      NotAllowedError:   'تم رفض إذن الكاميرا. اسمح بالوصول من إعدادات المتصفح.',
-      NotFoundError:     'لم يتم العثور على كاميرا متصلة بالجهاز.',
-      NotReadableError:  'الكاميرا مستخدمة من قبل تطبيق آخر. أغلقه وحاول مجددًا.',
+      NotAllowedError: 'تم رفض إذن الكاميرا. اسمح بالوصول من إعدادات المتصفح. / Camera permission denied.',
+      NotFoundError: 'لم يتم العثور على كاميرا. / No camera found.',
+      NotReadableError: 'الكاميرا مستخدمة من تطبيق آخر. / Camera is in use by another app.',
     };
-    toast(messages[err.message] ?? messages[err.name] ?? `تعذّر التشغيل: ${err.message}`);
-    el.btnCamera.textContent = 'تشغيل الكاميرا';
-  } finally {
-    el.btnCamera.disabled = false;
+    el.camEmpty.querySelector('p').textContent =
+      messages[err.name] ?? `تعذّر تشغيل الكاميرا: ${err.message}`;
+    toast('تعذّر تشغيل الكاميرا — يمكنك المتابعة بدون كاميرا والمحاولة لاحقًا.');
   }
 }
 
+// Perception only needs enough resolution to find hands/pose, not the full
+// camera frame — encoding at the camera's native 960x720 on every tick was
+// real, measured CPU cost on modest hardware (jetson-realtime: "profile
+// before optimising", but canvas-encode cost scales directly with pixel
+// count, so this is the obvious first lever). Downscaling to a 480px side
+// cuts the pixels to encode ~4x, which cuts JS-thread encode time, wire
+// payload size, and the server's decode+MediaPipe cost together.
+const SEND_MAX_SIDE = 480;
+
+function sendFrame() {
+  if (!stream || !wsReady || el.video.readyState < 2) return;
+  const vw = el.video.videoWidth, vh = el.video.videoHeight;
+  if (!vw || !vh) return;
+  const scale = Math.min(1, SEND_MAX_SIDE / Math.max(vw, vh));
+  const w = Math.round(vw * scale), h = Math.round(vh * scale);
+  sendCanvas.width = w; sendCanvas.height = h;
+  sendCanvas.getContext('2d').drawImage(el.video, 0, 0, w, h);
+  const dataUrl = sendCanvas.toDataURL('image/jpeg', 0.6);
+  send({ type: 'frame', ts_ms: Math.round(performance.now()), data: dataUrl });
+}
+
 function stopCamera() {
-  running = false;
-  stopTranslating();
+  clearInterval(frameTimer);
+  frameTimer = null;
   stream?.getTracks().forEach(t => t.stop());
   stream = null;
   el.video.srcObject = null;
   clearCanvas(el.overlay);
-  buffer.length = 0;
-
   el.camEmpty.classList.remove('hidden');
-  el.camBadge.textContent = 'الكاميرا متوقفة';
-  el.camBadge.className = 'cam-badge';
-  el.btnCamera.textContent = 'تشغيل الكاميرا';
-  el.btnRecord.disabled = true;
-  el.btnTranslate.disabled = true;
-  el.handsReadout.textContent = 'لا توجد يد';
+  el.camEmpty.querySelector('p').textContent = 'جارٍ تشغيل الكاميرا…';
+  el.recIndicator.hidden = true;
+  setCamState('off');
 }
 
-// ── frame loop ──────────────────────────────────────────────────────────────
-function loop() {
-  if (!running) return;
+// ── presence auto-detect (hello screen) ─────────────────────────────────────
+// Boring choice first (jetson-realtime: "prefer the boring choice"): a simple
+// frame-difference motion heuristic on a low-res sample, not a face detector —
+// works offline, no extra model, no flaky experimental browser API. Good
+// enough to tell "someone is standing here" from "no one is"; swap for a
+// dedicated presence sensor later per docs/SYSTEM_DESIGN.md's open B1a
+// question. Tapping the screen remains a working fallback at all times
+// (deaf-kiosk-ux: never make an automatic feature the only way in) — wired in
+// wireEvents() below.
+let presenceStream = null;
+let presenceTimer = null;
+let presenceHits = 0;
+let presencePrevFrame = null;
+let presenceWatchActive = false;
+const PRESENCE_SAMPLE_MS = 400;
+const PRESENCE_HITS_NEEDED = 3;        // ~1.2s of sustained motion, not a passer-by
+const PRESENCE_MOTION_THRESHOLD = 18;  // mean abs pixel delta, 0-255 scale
+const presenceCanvas = document.createElement('canvas');
 
-  const now = performance.now();
-  const hands = tracker.detect(el.video, now);
-
-  if (el.chkSkeleton.checked) drawHands(el.overlay, el.video, hands);
-  else clearCanvas(el.overlay);
-
-  el.handsReadout.textContent =
-    hands.length === 0 ? 'لا توجد يد'
-    : hands.length === 1 ? 'يد واحدة' : 'يدان';
-
-  const feature = frameFeature(hands);
-
-  buffer.push({ t: now, f: feature });
-  while (buffer.length && now - buffer[0].t > BUFFER_MS) buffer.shift();
-
-  if (recording) {
-    recording.frames.push(feature);
-    if (now >= recording.until) finishRecording();
-  } else if (translating && now - lastClassifyAt >= CLASSIFY_EVERY) {
-    lastClassifyAt = now;
-    classifyLive(now);
+// A tap can land while getUserMedia()/play() is still pending (both are async).
+// Without this flag, stopPresenceWatch() runs on a stream that doesn't exist
+// yet, and the in-flight promise resolves afterwards and starts the camera
+// anyway — a live camera the visitor has already walked away from, on a
+// screen that no longer wants it. presenceWatchActive is checked after each
+// await so a stop during either one aborts cleanly instead of racing it.
+async function startPresenceWatch(onDetected) {
+  presenceWatchActive = true;
+  let localStream;
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 160 }, height: { ideal: 120 }, facingMode: 'user' },
+    });
+  } catch {
+    return;   // no camera / permission denied — tap-to-start is still available
   }
+  if (!presenceWatchActive) { localStream.getTracks().forEach(t => t.stop()); return; }
 
-  requestAnimationFrame(loop);
+  presenceStream = localStream;
+  el.presenceVideo.srcObject = presenceStream;
+  await el.presenceVideo.play();
+  if (!presenceWatchActive) { stopPresenceWatch(); return; }
+
+  presenceHits = 0;
+  presencePrevFrame = null;
+  presenceTimer = setInterval(() => samplePresence(onDetected), PRESENCE_SAMPLE_MS);
 }
 
-// ── live translation ────────────────────────────────────────────────────────
-function classifyLive(now) {
-  const frames = buffer.filter(b => now - b.t <= MATCH_WINDOW_MS).map(b => b.f);
+function samplePresence(onDetected) {
+  const v = el.presenceVideo;
+  if (v.readyState < 2) return;
+  presenceCanvas.width = 32; presenceCanvas.height = 24;
+  const ctx = presenceCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(v, 0, 0, 32, 24);
+  const frame = ctx.getImageData(0, 0, 32, 24).data;
 
-  if (!hasHands(frames)) {           // hands away — reset and stay quiet
-    streakLabel = null; streakCount = 0;
-    showLive(null, 0);
-    return;
-  }
-
-  const vec = sequenceFeature(frames);
-  const match = vec && recognizer.classify(vec);
-
-  if (!match || match.confidence < settings.confidence) {
-    streakLabel = null; streakCount = 0;
-    showLive(match ? wordById(match.label) : null, match?.confidence ?? 0);
-    return;
-  }
-
-  streakCount = match.label === streakLabel ? streakCount + 1 : 1;
-  streakLabel = match.label;
-  showLive(wordById(match.label), match.confidence);
-
-  // Emit once the same word has held steady, and it is not an immediate repeat.
-  const isRepeat = match.label === lastEmit.label && now - lastEmit.at < settings.cooldown;
-  if (streakCount >= settings.stability && !isRepeat) {
-    emit(match.label);
-    lastEmit = { label: match.label, at: now };
-    streakCount = 0;
-  }
-}
-
-function showLive(word, confidence) {
-  el.liveLabel.textContent = word ? word.ar : '—';
-  el.liveConf.textContent  = `${Math.round(confidence * 100)}%`;
-  el.liveFill.style.width  = `${Math.round(confidence * 100)}%`;
-}
-
-function emit(label) {
-  const word = wordById(label);
-  if (!word) return;
-
-  sentence.ar.push(word.ar);
-  sentence.en.push(word.en);
-  renderSentence();
-
-  if (el.chkAutoSpeak.checked) speak(word.ar, 'ar');
-}
-
-function renderSentence() {
-  el.outAr.textContent = sentence.ar.join(' ') || '…';
-  el.outEn.textContent = sentence.en.join(' ') || '…';
-}
-
-function startTranslating() {
-  translating = true;
-  streakLabel = null; streakCount = 0;
-  lastEmit = { label: null, at: 0 };
-  el.btnTranslate.textContent = 'إيقاف الترجمة';
-  el.btnTranslate.classList.replace('btn-primary', 'btn-ghost');
-}
-
-function stopTranslating() {
-  translating = false;
-  showLive(null, 0);
-  el.btnTranslate.textContent = 'بدء الترجمة';
-  el.btnTranslate.classList.replace('btn-ghost', 'btn-primary');
-}
-
-// ── recording samples ───────────────────────────────────────────────────────
-async function recordSample() {
-  const wordId = el.selWord.value;
-  if (!wordId || recording) return;
-
-  const wasTranslating = translating;
-  stopTranslating();
-  el.btnRecord.disabled = true;
-
-  // Countdown gives the signer time to get into position.
-  el.countdown.hidden = false;
-  for (let n = REC_COUNTDOWN; n > 0; n--) {
-    el.countdown.textContent = arNum(n);
-    await new Promise(r => setTimeout(r, 700));
-  }
-  el.countdown.hidden = true;
-
-  el.camBadge.textContent = 'جارٍ التسجيل…';
-  el.camBadge.className = 'cam-badge rec';
-
-  recording = {
-    wordId,
-    frames: [],
-    until: performance.now() + Number(el.selDuration.value),
-    resumeTranslating: wasTranslating,
-  };
-}
-
-async function finishRecording() {
-  const { frames, wordId, resumeTranslating } = recording;
-  recording = null;
-
-  el.camBadge.textContent = 'الكاميرا تعمل';
-  el.camBadge.className = 'cam-badge live';
-  el.btnRecord.disabled = !running;
-
-  if (!hasHands(frames)) {
-    toast('لم تُرصد أي يد أثناء التسجيل — حاول مرة أخرى أمام الكاميرا.');
-    return;
-  }
-
-  const vec = sequenceFeature(frames);
-  if (!vec) { toast('فشل التسجيل، حاول مرة أخرى.'); return; }
-
-  state.samples.push({ label: wordId, vec, createdAt: Date.now() });
-  await persist();
-
-  const word = wordById(wordId);
-  toast(`تم حفظ عيّنة لكلمة «${word.ar}» (${arNum(samplesFor(wordId))})`);
-  renderTrain();
-  renderData();
-  refit();
-
-  if (resumeTranslating && !el.btnTranslate.disabled) startTranslating();
-}
-
-// ── rendering ───────────────────────────────────────────────────────────────
-function renderTrain() {
-  const selected = el.selWord.value;
-  el.selWord.innerHTML = '';
-
-  for (const w of state.words) {
-    const n = samplesFor(w.id);
-    const opt = document.createElement('option');
-    opt.value = w.id;
-    opt.textContent = `${w.ar} — ${w.en}${n ? `  (${arNum(n)})` : ''}`;
-    el.selWord.append(opt);
-  }
-  if (selected && wordById(selected)) el.selWord.value = selected;
-
-  const n = samplesFor(el.selWord.value);
-  el.sampleCount.textContent = n >= MIN_SAMPLES_WORD
-    ? `${arNum(n)} عيّنات — جاهزة ✓`
-    : `${arNum(n)} من ${arNum(MIN_SAMPLES_WORD)} عيّنات مطلوبة`;
-}
-
-function renderData() {
-  const trained = trainableWords().length;
-  el.stats.innerHTML = `
-    <div><b>${arNum(state.words.length)}</b>كلمة</div>
-    <div><b>${arNum(trained)}</b>كلمة مُدرَّبة</div>
-    <div><b>${arNum(state.samples.length)}</b>عيّنة مسجّلة</div>`;
-
-  const tbody = el.wordTable.querySelector('tbody');
-  tbody.innerHTML = '';
-
-  for (const w of [...state.words].sort((a, b) => samplesFor(b.id) - samplesFor(a.id))) {
-    const n = samplesFor(w.id);
-    const tr = document.createElement('tr');
-
-    const ar = document.createElement('td'); ar.textContent = w.ar;
-    const en = document.createElement('td'); en.dir = 'ltr'; en.textContent = w.en;
-    const ct = document.createElement('td');
-    ct.textContent = n >= MIN_SAMPLES_WORD ? `${arNum(n)} ✓` : arNum(n);
-
-    const actions = document.createElement('td');
-    if (n) {
-      const clear = document.createElement('button');
-      clear.className = 'row-del';
-      clear.textContent = 'مسح العيّنات';
-      clear.onclick = async () => {
-        state.samples = state.samples.filter(s => s.label !== w.id);
-        await persist(); renderTrain(); renderData(); refit();
-      };
-      actions.append(clear);
+  if (presencePrevFrame) {
+    let sum = 0;
+    for (let i = 0; i < frame.length; i += 4) sum += Math.abs(frame[i] - presencePrevFrame[i]);
+    const mean = sum / (frame.length / 4);
+    presenceHits = mean > PRESENCE_MOTION_THRESHOLD ? presenceHits + 1 : 0;
+    if (presenceHits >= PRESENCE_HITS_NEEDED) {
+      stopPresenceWatch();
+      onDetected();
+      return;
     }
-
-    tr.append(ar, en, ct, actions);
-    tbody.append(tr);
   }
+  presencePrevFrame = frame;
 }
 
-// ── events ──────────────────────────────────────────────────────────────────
+function stopPresenceWatch() {
+  presenceWatchActive = false;
+  clearInterval(presenceTimer);
+  presenceTimer = null;
+  presenceStream?.getTracks().forEach(t => t.stop());
+  presenceStream = null;
+  el.presenceVideo.srcObject = null;
+  presencePrevFrame = null;
+}
+
+function enterHello() {
+  showView('hello');
+  startPresenceWatch(enterLanguage);
+}
+
+function enterLanguage() {
+  stopPresenceWatch();
+  showView('language');
+}
+
+// ── flow wiring ──────────────────────────────────────────────────────────────
+let selectedLang = null;
+let thankyouTimer = null;
+const THANKYOU_DISPLAY_MS = 5000;
+
 function wireEvents() {
-  el.btnCamera.onclick    = () => (running ? stopCamera() : startCamera());
-  el.btnTranslate.onclick = () => (translating ? stopTranslating() : startTranslating());
-  el.btnRecord.onclick    = recordSample;
-  el.selWord.onchange     = renderTrain;
+  views.hello.onclick = enterLanguage;   // explicit tap, always works
 
-  const applyMirror = () => {
-    el.video.classList.toggle('mirrored', el.chkMirror.checked);
-    el.overlay.classList.toggle('mirrored', el.chkMirror.checked);
-  };
-  el.chkMirror.onchange = applyMirror;
-  applyMirror();
-
-  // tabs
-  for (const tab of document.querySelectorAll('.tab')) {
-    tab.onclick = () => {
-      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('is-active', t === tab));
-      for (const view of ['translate', 'train', 'data']) {
-        $(`#view-${view}`).hidden = view !== tab.dataset.view;
-      }
+  for (const card of document.querySelectorAll('.lang-card:not([disabled])')) {
+    card.onclick = () => {
+      selectedLang = card.dataset.lang;
+      applyLanguageLocale(selectedLang);
+      send({ type: 'language', lang: selectedLang });
+      showView('consent');
     };
   }
 
-  // sentence actions
-  $('#btnClear').onclick     = () => { sentence.ar = []; sentence.en = []; renderSentence(); };
-  $('#btnBackspace').onclick = () => { sentence.ar.pop(); sentence.en.pop(); renderSentence(); };
-  $('#btnCopy').onclick = async () => {
-    await navigator.clipboard.writeText(`${sentence.ar.join(' ')}\n${sentence.en.join(' ')}`);
-    toast('تم النسخ.');
+  const updateContinueEnabled = () => {
+    $('#btnConsentContinue').disabled = !$('#chkConsentProcessing').checked;
   };
-  for (const btn of document.querySelectorAll('[data-speak]')) {
-    const lang = btn.dataset.speak;
-    btn.onclick = () => speak(sentence[lang].join(' '), lang);
-  }
+  $('#chkConsentProcessing').onchange = updateContinueEnabled;
+  updateContinueEnabled();
 
-  // sensitivity sliders
-  const bind = (id, apply) => {
-    const input = $(id);
-    input.oninput = () => apply(Number(input.value));
-    apply(Number(input.value));
-  };
-  bind('#rngConf', v => { settings.confidence = v / 100; $('#valConf').textContent = `${v}%`; });
-  bind('#rngStable', v => { settings.stability = v; $('#valStable').textContent = arNum(v); });
-  bind('#rngCooldown', v => {
-    settings.cooldown = v * 100;
-    $('#valCooldown').textContent = (v / 10).toFixed(1);
-  });
-
-  // new word
-  $('#btnAddWord').onclick = async () => {
-    const ar = el.newAr.value.trim(), en = el.newEn.value.trim();
-    if (!ar || !en) { toast('اكتب الكلمة بالعربية والإنجليزية.'); return; }
-
-    const id = `w_${Date.now().toString(36)}`;
-    state.words.push({ id, ar, en });
-    await persist();
-    el.newAr.value = el.newEn.value = '';
-    renderTrain(); renderData();
-    el.selWord.value = id;
-    renderTrain();
-    toast(`تمت إضافة «${ar}».`);
+  $('#btnConsentContinue').onclick = () => {
+    const retention = $('#chkConsentRetention').checked;
+    send({
+      type: 'consent',
+      processing: $('#chkConsentProcessing').checked,
+      retention,
+    });
+    // "Show an unmistakable indicator whenever recording is happening"
+    // (deaf-kiosk-ux) — and only then. Declining retention leaves it absent.
+    el.recIndicator.hidden = !retention;
+    showView('capture');
+    startCamera();
   };
 
-  // data management
-  $('#btnExport').onclick = () => exportFile(state);
-  $('#btnImport').onclick = () => el.fileImport.click();
-  el.fileImport.onchange = async () => {
-    const file = el.fileImport.files[0];
-    if (!file) return;
-    try {
-      const data = await importFile(file, FEATURE_DIM);
-      state.words = data.words;
-      state.samples = data.samples;
-      await persist();
-      renderTrain(); renderData(); refit();
-      toast(`تم الاستيراد: ${arNum(data.words.length)} كلمة، ${arNum(data.samples.length)} عيّنة.`);
-    } catch (err) {
-      toast(err.message);
-    }
-    el.fileImport.value = '';
+  $('#btnClear').onclick = () => send({ type: 'control', action: 'clear' });
+  $('#btnBackspace').onclick = () => send({ type: 'control', action: 'backspace' });
+  $('#btnAsk').onclick = () => {
+    setCamState('thinking');
+    send({ type: 'ask' });
   };
-  $('#btnReset').onclick = async () => {
-    if (!confirm('سيتم حذف كل الكلمات والعيّنات المسجّلة. هل أنت متأكد؟')) return;
-    state.words = [...STARTER_WORDS];
-    state.samples = [];
-    await persist();
-    renderTrain(); renderData(); refit();
-    toast('تمت إعادة التعيين.');
+
+  $('#btnSpeakAr').onclick = () => send({ type: 'speak', lang: 'ar' });
+  $('#btnSpeakEn').onclick = () => send({ type: 'speak', lang: 'en' });
+
+  $('#btnBackToCapture').onclick = () => showView('capture');
+
+  const endSession = () => send({ type: 'control', action: 'end_session' });
+  $('#btnEndSession').onclick = endSession;
+  $('#btnEndSessionFromAnswer').onclick = endSession;
+
+  $('#btnIdleExtend').onclick = () => {
+    el.idleOverlay.hidden = true;
+    send({ type: 'control', action: 'extend' });
   };
 }
 
-// ── boot ────────────────────────────────────────────────────────────────────
 async function init() {
-  const saved = await loadState();
-  state.words   = saved?.words?.length ? saved.words : [...STARTER_WORDS];
-  state.samples = (saved?.samples ?? []).map(s => ({ ...s, vec: Float32Array.from(s.vec) }));
-
+  await loadVocab();
   wireEvents();
-  renderTrain();
-  renderData();
-  renderSentence();
-  refit();
+  connect();
+  enterHello();
+
+  // Keep-alive so a mid-flow WebSocket idle timeout on the server side never
+  // fires just because the visitor is reading, not signing.
+  setInterval(() => send({ type: 'ping' }), 15000);
 }
 
 init();

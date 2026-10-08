@@ -1,0 +1,19 @@
+# Kiosk (B1-B10) runtime dependencies, pinned to what was actually installed and
+# tested against (docs/SYSTEM_DESIGN.md §5: Python 3.11).
+#
+# Install into a dedicated venv built from the real Python 3.11 install — NOT
+# whatever `python` resolves to on PATH — see kiosk/README.md "Setup".
+#
+#   /c/Users/Abdel/AppData/Local/Programs/Python/Python311/python.exe -m venv .venv
+#   .venv/Scripts/python.exe -m pip install -r kiosk/requirements.txt
+
+numpy==2.4.6
+torch==2.14.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+websockets==17.1
+mediapipe==1.0.1
+opencv-python-headless==5.0.0.93
+pyttsx3==2.99
+anthropic==1.3.0
+pytest==9.1.1
