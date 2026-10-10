@@ -320,7 +320,9 @@ class KioskConnection:
                               "alternatives": hypothesis.alternatives})
             return
 
-        if hypothesis.confidence >= CONFIG.confident_threshold:
+        recognizer = self.pack.recognizer if self.pack is not None else None
+        confident = recognizer.confident_threshold if recognizer else CONFIG.confident_threshold
+        if hypothesis.confidence >= confident:
             self.assembler.append(hypothesis.gloss)
             self.capture.add(CapturedItem(
                 utterance_id=str(uuid.uuid4()), landmarks=raw_frames,

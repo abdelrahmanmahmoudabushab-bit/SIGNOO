@@ -59,7 +59,11 @@ class LanguageRegistry:
             )
             if entry.get("model") and entry.get("vocab"):
                 model_path = overrides.get(pack.code) or repo_root / entry["model"]
-                self._load(pack, model_path, repo_root / entry["vocab"], reject, confident, top_k)
+                # A language may set its own bars: a weak pilot model should ask the
+                # visitor to confirm more often than a well-trained one.
+                self._load(pack, model_path, repo_root / entry["vocab"],
+                           entry.get("reject_threshold", reject),
+                           entry.get("confident_threshold", confident), top_k)
             self.packs[pack.code] = pack
 
     @staticmethod

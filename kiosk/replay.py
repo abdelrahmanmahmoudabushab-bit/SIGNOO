@@ -98,12 +98,15 @@ def main() -> None:
     ap.add_argument("root", help="folder of <signer>/<sign>/<clip>.mp4")
     ap.add_argument("--language", default="asl")
     ap.add_argument("--signers", nargs="*", help="only these signer folders (default: all)")
+    ap.add_argument("--signs", nargs="*", help="only these sign folders (default: all)")
+    ap.add_argument("--model", help="checkpoint to test instead of the language's configured one")
     ap.add_argument("--limit", type=int, default=0, help="stop after N clips")
     ap.add_argument("--fast", action="store_true", help="do not pace to the video's frame rate")
     args = ap.parse_args()
 
     registry = LanguageRegistry(CONFIG.languages_path, REPO_ROOT, CONFIG.reject_threshold,
-                                CONFIG.confident_threshold, CONFIG.top_k_alternatives)
+                                CONFIG.confident_threshold, CONFIG.top_k_alternatives,
+                                model_overrides={args.language: Path(args.model)} if args.model else None)
     pack = registry.get(args.language)
     if pack is None or not pack.ready:
         raise SystemExit(f"language {args.language!r} has no loadable model")
@@ -111,39 +114,65 @@ def main() -> None:
     videos = sorted(Path(args.root).rglob("*.mp4"))
     if args.signers:
         videos = [v for v in videos if v.parent.parent.name in set(args.signers)]
+    if args.signs:
+        videos = [v for v in videos if v.parent.name in set(args.signs)]
     if args.limit:
         videos = videos[: args.limit]
 
-    outcome = Counter()
-    wrong = []
+    recognizer = pack.recognizer
+    known_signs = set(recognizer.labels)
+    outcome = {"known": Counter(), "unknown": Counter()}
+    totals = Counter()
+    harmful = []
     for n, video in enumerate(videos, 1):
         truth = video.parent.name
-        hyps, stats = replay_video(video, pack.recognizer, realtime=not args.fast)
-        committed = [h for h in hyps if h.gloss is not None]
-        if not hyps:
-            outcome["no_utterance"] += 1
-        elif len(hyps) > 1:
-            outcome["split_into_several"] += 1
-        best = max(committed, key=lambda h: h.confidence, default=None)
+        group = "known" if truth in known_signs else "unknown"
+        totals[group] += 1
+        hyps, stats = replay_video(video, recognizer, realtime=not args.fast)
+
+        # What the kiosk would do with each utterance: commit a word, offer candidates
+        # for the visitor to confirm, or refuse. Judge the clip by its most confident one.
+        def status(h) -> str:
+            if h.gloss is None:
+                return "rejected"
+            return "committed" if h.confidence >= recognizer.confident_threshold else "candidates"
+
+        best = max(hyps, key=lambda h: h.confidence, default=None)
         if best is None:
-            if hyps:
-                outcome["all_rejected"] += 1
-        elif best.gloss == truth:
-            outcome["correct"] += 1
+            result = "no_utterance"
         else:
-            outcome["wrong"] += 1
-            wrong.append(f"{truth} -> {best.gloss} ({best.confidence:.2f})  {video.name}")
+            result = status(best)
+            if result == "committed":
+                result = "committed_correct" if best.gloss == truth else "committed_WRONG"
+                if result == "committed_WRONG":
+                    harmful.append(f"{truth} -> {best.gloss} ({best.confidence:.2f})  {video.name}")
+            elif result == "candidates" and truth in [g for g, _ in best.alternatives]:
+                result = "candidates_with_truth"
+        outcome[group][result] += 1
+        if sum(status(h) == "committed" for h in hyps) > 1:
+            outcome[group]["extra_committed_words"] += 1
         print(f"[{n}/{len(videos)}] {truth:9s} utterances={len(hyps)} "
-              f"said={best.gloss if best else None}  results={stats['results']} "
+              f"{result}  said={best.gloss if best else None}  results={stats['results']} "
               f"hand_frames={stats['hand_frames']} utt_frames={stats['utterance_frames']} "
               f"{video.parent.parent.name}", flush=True)
 
-    total = len(videos)
-    print(f"\n{total} clips through the live path ({args.language})")
-    for key in ("correct", "wrong", "all_rejected", "no_utterance", "split_into_several"):
-        print(f"  {key:20s} {outcome[key]:4d}  ({outcome[key] / max(total, 1):.0%})")
-    for line in wrong[:15]:
-        print("  wrong:", line)
+    print(f"\nlive path ({args.language}); commits need confidence >= {recognizer.confident_threshold}")
+    for group, keys in (
+        ("known", ("committed_correct", "committed_WRONG", "candidates_with_truth", "candidates",
+                   "rejected", "no_utterance", "extra_committed_words")),
+        ("unknown", ("committed_WRONG", "committed_correct", "candidates", "candidates_with_truth",
+                     "rejected", "no_utterance", "extra_committed_words")),
+    ):
+        total = totals[group]
+        if not total:
+            continue
+        print(f"\n{group.upper()} signs: {total} clips")
+        for key in keys:
+            if outcome[group][key]:
+                label = key if group == "known" or key != "committed_WRONG" else "committed (false accept)"
+                print(f"  {label:26s} {outcome[group][key]:4d}  ({outcome[group][key] / total:.0%})")
+    for line in harmful[:15]:
+        print("  confident mistake:", line)
 
 
 if __name__ == "__main__":

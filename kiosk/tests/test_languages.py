@@ -33,7 +33,7 @@ def _checkpoint(path: Path, labels: list[str], favoured: int) -> None:
                 "input_dim": FRAME_DIM * 2}, path)
 
 
-def _world(tmp_path: Path) -> LanguageRegistry:
+def _world(tmp_path: Path, asl_confident: float | None = None) -> LanguageRegistry:
     (tmp_path / "models").mkdir()
     _checkpoint(tmp_path / "models" / "liu.pt", ["marhaba", "shukran"], favoured=0)
     _checkpoint(tmp_path / "models" / "asl.pt", ["dog", "cat"], favoured=0)
@@ -46,7 +46,8 @@ def _world(tmp_path: Path) -> LanguageRegistry:
     config = tmp_path / "languages.json"
     config.write_text(json.dumps([
         {"code": "liu", "model": "models/liu.pt", "vocab": "liu_vocab.json", "status": "live", "real_data": False},
-        {"code": "asl", "model": "models/asl.pt", "vocab": "asl_vocab.json", "status": "pilot", "real_data": True},
+        {"code": "asl", "model": "models/asl.pt", "vocab": "asl_vocab.json", "status": "pilot", "real_data": True,
+         **({"confident_threshold": asl_confident} if asl_confident else {})},
         {"code": "esl", "model": None, "vocab": None, "status": "coming_soon", "real_data": False},
         {"code": "ssl", "model": "models/missing.pt", "vocab": "liu_vocab.json", "status": "coming_soon", "real_data": False},
     ]), encoding="utf-8")
@@ -57,6 +58,28 @@ def _utterance() -> Utterance:
     frames = [Landmarks(ts_ms=i * 30, pose=np.zeros((33, 3), dtype=np.float32),
                         left=np.zeros((21, 3), dtype=np.float32), right=None) for i in range(10)]
     return Utterance(landmarks=frames, t_start=0, t_end=frames[-1].ts_ms)
+
+
+def test_a_language_can_demand_more_confidence_before_a_word_is_committed(tmp_path):
+    """A weak model (a small pilot vocabulary) should not auto-commit at the default
+    confidence; below its own bar the visitor is shown candidates to tap instead."""
+    registry = _world(tmp_path, asl_confident=0.95)
+    assert registry.get("asl").recognizer.confident_threshold == 0.95
+    assert registry.get("liu").recognizer.confident_threshold == 0.8        # untouched default
+
+
+def test_below_a_languages_bar_the_word_becomes_candidates_not_a_commit(tmp_path, monkeypatch):
+    import kiosk.main as kiosk_main
+    from core.contracts import Hypothesis
+
+    monkeypatch.setattr(kiosk_main, "registry", _world(tmp_path, asl_confident=0.95))
+    conn = kiosk_main.KioskConnection(_FakeWS())
+    asyncio.run(conn.handle({"type": "language", "lang": "asl"}))
+
+    asyncio.run(conn._handle_hypothesis(Hypothesis("dog", 0.9, [("dog", 0.9), ("cat", 0.06)]), _utterance()))
+
+    assert conn.ws.sent[-1]["status"] == "candidates"
+    assert conn.assembler.gloss_seq == []                                   # nothing was committed
 
 
 def test_only_languages_with_a_loadable_model_are_ready(tmp_path):
