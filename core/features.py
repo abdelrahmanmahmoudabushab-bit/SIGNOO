@@ -24,6 +24,11 @@ POSE_UPPER = list(range(25))
 
 SEQ_LEN = 64          # frames every clip is resampled to (~2 s at 30 fps)
 POSE_DIM = len(POSE_UPPER) * 3
+# MediaPipe pose joints that come in left/right pairs within POSE_UPPER: eyes (inner,
+# centre, outer), ears, mouth corners, shoulders, elbows, wrists, pinkies, index
+# fingers, thumbs, hips.
+POSE_MIRROR_PAIRS = ((1, 4), (2, 5), (3, 6), (7, 8), (9, 10), (11, 12), (13, 14),
+                     (15, 16), (17, 18), (19, 20), (21, 22), (23, 24))
 HAND_DIM = N_HAND * 3
 FRAME_DIM = POSE_DIM + 2 * HAND_DIM + 2      # + presence flag per hand
 FEATURE_SHAPE = (SEQ_LEN, FRAME_DIM)
@@ -115,6 +120,11 @@ def mirror(clip):
     clip = np.array(clip, dtype=np.float32, copy=True)
 
     clip[:, 0:POSE_DIM:3] *= -1               # pose x
+    # A mirror also turns the left shoulder into the right one: swap each paired joint,
+    # or the result is a body no real signer has (left shoulder on the right side).
+    pose = clip[:, :POSE_DIM].reshape(len(clip), -1, 3)
+    for a, b in POSE_MIRROR_PAIRS:
+        pose[:, [a, b]] = pose[:, [b, a]]
     left = slice(POSE_DIM, POSE_DIM + 1 + HAND_DIM)
     right = slice(POSE_DIM + 1 + HAND_DIM, FRAME_DIM)
     clip[:, left.start + 1: left.stop: 3] *= -1     # hand x, skipping presence flag
