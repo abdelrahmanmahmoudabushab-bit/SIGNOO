@@ -9,33 +9,78 @@ stops.
 
 ---
 
-## Current state vs. this plan (as of 2026-10-07)
+## Current state vs. this plan (as of 2026-10-10)
 
 The phasing below assumes each phase's code is written *after* its predecessor's exit
 criteria are met. In practice, engineering got ahead of the gates: the kiosk runtime
-(B1–B10), the server backend (B11–B16), and the console admin UI were all scaffolded
-and partly implemented before Phase 1's data-collection exit criteria were satisfied.
-This is not necessarily wrong — a solo/small team can't literally pause coding while
-waiting on signer recruitment — but it means the gates below are **unmet**, not
+(B1–B10), the server backend (B11–B16), and the console admin UI were all built
+before Phase 1's data-collection exit criteria were satisfied. This is not necessarily
+wrong — a solo/small team can't literally pause coding while waiting on signer
+recruitment — but it means the gates below are **unmet**, not
 **pending-because-not-started**:
 
-- `kiosk/` — B1–B10 implemented, 16 unit tests passing (mocked perception; not yet run
-  hot on a Jetson). **Untracked in git** (`?? kiosk/`) — never committed.
+- `kiosk/` — B1–B10 implemented and **committed** (`a7ffa3f`, 2026-10-08). 16/16 unit
+  tests passing (re-run 2026-10-10; perception is mocked in tests).
 - `server/` — B11–B16 implemented (FastAPI, Alembic migrations, promotion gate, 7 test
-  files). Committed in `915a165`. **28/28 tests passing** (confirmed 2026-10-08, via
+  files). Committed in `915a165`. 28/28 tests passing (last confirmed 2026-10-08, via
   `server/.venv`).
-- `console/` — React/TS admin UI implemented, 17 tests passing. `electron/`'s
-  `npm install` also confirmed working (70 packages, electron 33.4.11 resolved).
-  Both **untracked in git** (`?? console/`, `?? electron/`) — never committed.
+- `console/` — React/TS admin UI, 17 tests passing (last confirmed 2026-10-08), and
+  `electron/` (kiosk app shell). Both **committed** in `a7ffa3f`.
 - `core/features.py` / `core/contracts.py` — shared between kiosk and `ml/`, committed.
+  The `assets/recognizer.js` + `ml/features.py` → `core/features.py` refactor is
+  finished and committed; `kiosk/tests/test_features_parity.py` guards train/inference
+  parity. `ml/compare_splits.py` has **not** been re-run since the refactor.
+- **Jetson deployment happened, but Phase 0's exit criterion is still unmeasured.**
+  `a7ffa3f`'s message records the kiosk running on a Jetson Orin Nano (JetPack 6.x) as
+  systemd user services, model loaded, rendering screenshot-confirmed — and that
+  deployment surfaced and fixed two real bugs (event-loop blocking in
+  `kiosk/main.py`, and a too-eager Electron health watchdog). What is **not**
+  recorded anywhere: sustained fps, capture→landmark latency, memory, or thermal
+  steady state (Phase 0 requires ≥30 fps for 20 min hot). Also, the model there runs
+  as plain PyTorch on CPU — no TensorRT conversion yet. "Runs on the board" is
+  therefore a bring-up milestone, not the exit criterion. Do not tick Phase 0's
+  perception box until the 20-minute hot measurement exists.
 - **No real signer data exists.** `data/` contains only `synthetic/`. `models/signoo.pt`
   is trained on synthetic data, not real LIU recordings. Phase 0's exit criteria
-  (perception sustains 30 fps hot on Jetson, ≥5 signers committed, consent pack
-  approved) and Phase 1's (50 signs × 10 signers × 5 reps, ≥85% signer-independent) are
-  both **not yet met** — the single biggest gap between this document and reality.
-- A browser-only single-signer prototype (`index.html`, `assets/*.js`) still exists at
-  the repo root, separate from `kiosk/`, and is mid-refactor (`assets/recognizer.js`
-  and `ml/features.py` deleted in favor of the shared `core/features.py`).
+  (≥5 signers committed, consent pack approved) and Phase 1's (50 signs × 10 signers
+  × 5 reps, ≥85% signer-independent) are both **not yet met** — the single biggest gap
+  between this document and reality.
+- **Code-vs-doc drift found in the 2026-10-10 read-through.** Each was a place where the
+  code did less than the docs/commit messages implied. Status after the same-day fixes:
+  1. ~~Learning loop cannot run on kiosk data~~ **Fixed.** `kiosk/data_capture.py` now
+     does store-and-forward upload to `server/ingest` (set `SIGNOO_SERVER_URL`; blank =
+     nothing leaves the device), deleting a queued session only after a 2xx. Each visit
+     carries an anonymous `visitor-<8 hex>` `signer_id`, so a visit stands in for a signer
+     and the signer-independent split stays possible. `unknown` rows are excluded from
+     training exports. **Still open:** a returning visitor is a new "signer", so held-out
+     visitor data is slightly less strict than true person-level separation.
+  2. ~~"3-day cadence is automatic" not implemented~~ **Fixed.** `server/scheduler.py`
+     trains a candidate every `SIGNOO_AUTO_TRAIN_HOURS` (72) and never promotes. It
+     refuses to run until the benchmark is frozen by a deliberate first
+     `POST /training/trigger`. Disable with `SIGNOO_AUTO_TRAIN=0`.
+  3. ~~The shadow run is a button~~ **Fixed.** `POST /registry/{v}/shadow-complete` now
+     scores the candidate on reviewed live items validated *after* it was created
+     (`server/shadow.py`), compares with what the champion actually said on the same
+     items, and returns 409 until `SIGNOO_SHADOW_MIN_ITEMS` (30) exist. **Still open:**
+     fleet-wide live-metric monitoring during a staged rollout.
+  4. *Gate criteria:* **criterion 4** (zero-recall class) now **fails** when `per_sign` is
+     missing. **Still open:** criterion 5 (`false_accept_rate`) passes when unmeasured,
+     because `ml/evaluate.py` has no non-signing negative set yet. It must become a fail
+     once that set exists.
+  5. ~~Test signers are not frozen~~ **Fixed.** The first export for a language freezes its
+     val/test signers (`server/runs/frozen_split.json`); later signers go to train, and
+     training refuses if a frozen benchmark signer disappears. **Still open:** DR-7a also
+     wants the benchmark *human-verified*; freezing it only stops it from drifting.
+  6. ~~Session states~~ **Resolved by documentation.** `attract` is the browser's Hello
+     screen and `ended` its Thank-you screen (`kiosk/session.py`, `kiosk/main.py`,
+     `kiosk/README.md`). Presence detection stays client-side by design (privacy).
+  7. ~~Idle timeout can't fire during an active session~~ **Fixed.** Frames and pings no
+     longer count as activity (a frame counts only if it shows hands) and `check_idle`
+     now runs on the clock, not only on silence.
+  8. **New, fixed:** the console's `withMockFallback` turned a server refusal (such as the
+     promotion gate's 409) into a mock "success", so a refused promotion looked
+     promoted. Writes now surface the server's error; reads and unreachable servers
+     still fall back to mocks, labelled by source.
 
 **Implication:** the code is substantially ahead of the data. The next two weeks
 should close that gap — see "Next two weeks" below — rather than add more block
@@ -265,16 +310,19 @@ Given the gap above, the next two weeks are about closing it, not writing more b
 code:
 
 **Week 1 — land what's already built, prove it runs**
-- Commit `kiosk/`, `console/`, and `electron/` (currently untracked) so they aren't one
-  `git clean` away from being lost
-- Reconcile the uncommitted `assets/` + `ml/features.py` → `core/features.py` refactor;
-  finish it, run `ml/compare_splits.py` to confirm the shared feature code still
-  reproduces the signer-independent-split behavior described in the README
+- ~~Commit `kiosk/`, `console/`, and `electron/`~~ **Done** in `a7ffa3f` (2026-10-08)
+- ~~Finish the `core/features.py` refactor~~ **Done** (committed). Still open: run
+  `ml/compare_splits.py` once to confirm the shared feature code still reproduces the
+  signer-independent-split behavior described in the README
 - ~~Install `server/requirements.txt`...~~ **Done 2026-10-08**: `server/.venv` already
   had everything needed — 28/28 tests pass. The earlier "missing dependency" was the
   wrong venv being used, not an actual gap.
-- Jetson bring-up: JetPack + TensorRT + camera, run the perception spike, measure fps
-  hot — this is Phase 0's one unresolved hardware exit criterion
+- Jetson: the kiosk already runs on the board (see "Current state"). What's left is the
+  measurement — sustained fps for 20 min hot, capture→landmark latency, memory,
+  thermals — and the TensorRT conversion of perception/recognition. This is Phase 0's
+  one unresolved hardware exit criterion
+- Wire B10→B11 (kiosk upload to `server/ingest`) and decide the `signer_id` question
+  for visitor-sourced data (drift item 1) before any real kiosk data is collected
 
 **Week 2 — start the real dataset, the actual blocker**
 - Finalize and get legal review on the consent pack (Arabic/English/sign video)
