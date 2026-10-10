@@ -50,6 +50,7 @@ import asyncio
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -73,7 +74,13 @@ import json
 configure_logging()
 logger = logging.getLogger("signoo.kiosk.main")
 
-app = FastAPI(title="SIGNOO kiosk")
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    _schedule_flush()   # retry anything a previous run could not deliver
+    yield
+
+
+app = FastAPI(title="SIGNOO kiosk", lifespan=_lifespan)
 
 # ── shared, process-wide singletons (models load once at startup, per SYSTEM_DESIGN.md §4.2) ──
 _vocab = Vocabulary(CONFIG.vocab_path)
@@ -104,11 +111,6 @@ def _schedule_flush() -> None:
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
-
-
-@app.on_event("startup")
-async def _flush_on_startup() -> None:
-    _schedule_flush()   # retry anything a previous run could not deliver
 
 
 @app.get("/health")
