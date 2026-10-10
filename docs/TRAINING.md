@@ -241,9 +241,20 @@ real time, as browser-style JPEG frames. First run: **0 of 8 clips produced a wo
 because the segmenter threw a word away when the hands dropped out of frame and only
 emitted after a held 500 ms pause. After the fix (a word ends when the hands leave),
 on all 89 held-out clips: **71% correct**, 15% wrong, 15% no word, 18% split into
-several words. That 71% is the number a visitor would experience; 85.4% is the
-classifier alone. Most wrong answers are confident (0.88 to 0.93, above the 0.80
-commit threshold) because a closed set of 8 signs must name one of them for anything.
+several words. A second segmenter pass (motion matched by position instead of by
+MediaPipe's flipping left/right label, smoothed over 3 frames so one noisy frame cannot
+restart the pause timer, and a resting hand no longer re-emitted as a stream of words)
+measured on a quiet machine: **75% correct, 10% wrong, 15% no word, 6% split**. That is
+the number a visitor would experience; 85.4% is the classifier alone. The 15% "no
+word" are clips where hand tracking found a hand in only a few frames; segmentation
+cannot recover those.
+
+**Refusal is the bigger problem.** On 30 clips of two signs the model was never taught
+(bird, book), it named one of its 8 signs **80% of the time**, mostly above the 0.80
+commit threshold. A closed vocabulary must name something for anything it sees. The fix
+is an explicit `__other__` class trained on signs outside the vocabulary
+(`ml/make_open_set.py`), read by the kiosk as a rejection (`kiosk/recognition.py`),
+and tested on unknown signs held completely out of training.
 
 **Limits.** 8 signs. Phone selfie video, not the kiosk camera, so accuracy on the
 kiosk will differ and has not been measured. Not reviewed by Deaf ASL signers. The
