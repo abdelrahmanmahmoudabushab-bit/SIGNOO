@@ -42,6 +42,20 @@ it actually lives).
 | `SIGNOO_KIOSK_PORT` | `8000` | Port the backend is told to listen on, and the port this app loads |
 | `SIGNOO_BACKEND_CMD` | `<repo>/.venv/Scripts/python.exe` (Win) / `.venv/bin/python` (else) | The Python interpreter to run the backend with |
 | `SIGNOO_BACKEND_ARGS` | `-m uvicorn kiosk.main:app --port <PORT>` | Args passed to that interpreter |
+| `SIGNOO_SKIP_BACKEND_SPAWN` | unset | Set to `1` when the backend runs as its own service (the Jetson's systemd units); this app then only waits for it and never spawns a second one |
+
+Any other `SIGNOO_*` variable in this app's environment is passed straight to the
+backend it spawns. When the backend runs as a separate service instead, set them in that
+service's environment. The ones a deployed kiosk needs:
+
+| Variable | Purpose |
+|---|---|
+| `SIGNOO_SERVER_URL` | Server base URL. Without it the kiosk keeps consented sessions on disk and sends no heartbeat |
+| `SIGNOO_KIOSK_TOKEN` | Shared secret the server requires (a production server refuses to start without one) |
+| `SIGNOO_KIOSK_ID` | Name this kiosk reports; unique per kiosk |
+| `SIGNOO_MODEL_PATH` | Overrides the Jordanian (`liu`) checkpoint; other languages are in `core/languages.json` |
+
+Full list and behaviour: `kiosk/README.md` and `server/README.md`.
 
 ## A gotcha specific to VSCode-integrated terminals
 
