@@ -98,6 +98,9 @@ Naming these now prevents a slow, silent expansion of scope later.
 
 - **FR-A1 Grounded answers.** Answer from a curated knowledge base for the deployment
   site. Refuse, visibly, when the question falls outside it rather than improvising.
+  *Amended 2026-10-11:* the knowledge base is per language as well as per site. A
+  question is answered only from the selected language's own knowledge base; a language
+  that has none refuses every question and never answers from another language's.
 - **FR-A2 Sign-first phrasing.** Produce short, concrete sentences suitable for
   rendering as sign, avoiding idiom and subordinate clauses.
 - **FR-A3 Vocabulary awareness.** Prefer wording whose words exist in the sign clip
@@ -119,6 +122,9 @@ Naming these now prevents a slow, silent expansion of scope later.
 - **FR-L5 Scheduled candidate.** Train a candidate model on validated data every 3
   days. The schedule is fixed and automatic; what is **not** automatic is whether a
   candidate ships (§5.3) — see the note under DR-6.
+  *Amended 2026-10-11:* the cycle is per language. Each language's candidate is trained
+  only on that language's validated data and judged only against that language's
+  champion and frozen benchmark (FR-L6 to FR-L8 apply per language in the same way).
 - **FR-L6 Promotion gate.** Promote only on passing every criterion in §5.3. Otherwise
   keep the champion and record why.
 - **FR-L7 Shadow run.** Run a passing candidate against live traffic without affecting
@@ -130,6 +136,8 @@ Naming these now prevents a slow, silent expansion of scope later.
 
 - **FR-W1 Fleet view.** Every kiosk with health, current model version, uptime,
   temperature, and last contact.
+  *Amended 2026-10-11:* a kiosk runs one model per language, so "current model version"
+  means one version per language on that kiosk, not a single value.
 - **FR-W2 Live session view.** Watch an in-progress session — recognitions and
   confidences — with camera imagery gated behind explicit authorisation and audit.
 - **FR-W3 Review workspace.** Play a clip, see prediction and confidence, confirm or
@@ -174,11 +182,19 @@ budget. Allocation is a design constraint, not an outcome:
 ```
 OS + display + application        ~1.5 GB
 perception (landmarks)            ~0.6 GB
-recognition models (×1 active)    ~0.2 GB
+recognition models (all ready languages) ~0.2 GB
 answering model (3B, quantised)   ~2.5 GB
 speech synthesis                  ~0.2 GB
-buffers, clip library, slack      ~1.0 GB
+buffers, clip libraries, slack    ~1.0 GB
 ```
+
+Amended 2026-10-11. The recognition line used to read "×1 active". Each language now
+has its own complete model and every ready language's model stays loaded
+(`SYSTEM_DESIGN.md` §1.1b, B4). At today's model size that is about 5 MB of weights per
+language, about 46 MB for nine, which fits in the same 0.2 GB line, so the 6.0 GB limit
+is unchanged. This is arithmetic, not a measurement: recognition memory with several
+languages loaded has not been measured on the device and must be before a second
+language goes live there (`SYSTEM_DESIGN.md` §4.2).
 
 **NFR-M2.** No unbounded growth: resident memory after 14 days continuous operation
 within 10% of the value after 1 hour.

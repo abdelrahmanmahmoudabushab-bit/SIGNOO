@@ -53,15 +53,69 @@ decision, restated).
 
 ### 1.1b One isolated engine per language
 
-Each sign language is its own engine: model, vocabulary, confidence bars, segmentation
-tuning, knowledge base and clip library (`core/languages.json`, loaded by
-`kiosk/languages.py`). The language card selects that engine as a unit. There is no
-fallback across languages: a language missing a part goes without it (not ready,
-questions refused, nothing played back) rather than borrowing another language's.
+Decided by the owner on 2026-10-11: every language has its own engine, and pressing a
+language card takes the visitor to that language's wholly isolated system. This
+replaces the earlier design of one shared recognition backbone with a small head per
+language (B4 records what that design was avoiding and what isolation costs).
 
-Drift to resolve: B4 below still describes one shared backbone with per-language
-heads. The kiosk as built loads a separate checkpoint per language, which is what this
-rule requires at runtime.
+An engine is six parts, all owned by one language and listed in one entry of
+`core/languages.json` (loaded by `kiosk/languages.py`):
+
+| Part | Block | Entry key | If the language does not have it |
+|---|---|---|---|
+| Model checkpoint | B4 | `model` | The language is not ready. Selecting it is refused |
+| Vocabulary | B5 | `vocab` | The language is not ready. Selecting it is refused |
+| Confidence bars (reject, confident) | B4 | `reject_threshold`, `confident_threshold` | The kiosk defaults apply |
+| Word-boundary tuning | B3 | `segmentation` | The kiosk defaults apply |
+| Knowledge base | B7 | `knowledge_base` | Every question is refused |
+| Clip library | B8 | `clip_library` | Nothing is played back |
+
+The rules:
+
+1. **The card selects the whole engine as a unit.** One call
+   (`KioskConnection._use_engine` in `kiosk/main.py`) replaces the connection's
+   recogniser, vocabulary, segmenter, dialogue and clip library together. There is no
+   state in which a visitor has one language's model and another language's vocabulary.
+2. **No fallback across languages.** A language with no trained model is refused with
+   the error `language_unavailable` and is never served by another language's model. A
+   language with no knowledge base of its own refuses questions. A language with no
+   clip library plays nothing back. Defaults for confidence bars and word-boundary
+   tuning are kiosk-wide numbers, not another language's tuning.
+3. **Nothing learned is shared.** No shared backbone, no shared head, no shared
+   vocabulary, no shared training data, no shared benchmark.
+4. **The server keeps the same separation.** Each language has its own reviewed data,
+   its own frozen benchmark signers, its own champion, its own gate verdicts and its own
+   automatic 3-day candidate cycle (B12, B13).
+
+What stays common to all languages, because it is code and not learned language
+content: camera capture (B1), landmark extraction (B2), the feature encoding
+(`core/features.py`), the model architecture code (`ml/model.py`, one class, different
+weights per language), speech output (B6), the session state machine (B9) and data
+capture (B10). B7's phrasing model is also common; it only rewords facts retrieved from
+the selected language's own knowledge base.
+
+**Where the code does not yet meet this rule** (read on 2026-10-11; each is repeated in
+the block it belongs to):
+
+- `liu` is marked `"status": "live"` with `"real_data": false` and runs
+  `models/signoo.pt`, a model trained on synthetic data. Readiness in
+  `kiosk/languages.py` checks only that the model and vocabulary load, not `real_data`.
+  This breaks the rule that a language without real training data says "coming soon".
+- The server's knowledge base (B14) has no language field. It is one table written to
+  one file, `kiosk/data/knowledge_base.json`, which is the `liu` engine's file.
+- The server's fleet record (B15) still holds one `language` and one
+  `current_model_version` per kiosk beside the new per-language `model_versions`, and
+  the kiosk always registers as `liu`. Per-language model distribution is being built
+  on 2026-10-11 and exists only as uncommitted work (B15).
+- The automatic cycle runs only for the languages named in
+  `SIGNOO_AUTO_TRAIN_LANGUAGES`, which defaults to `liu` alone.
+- A kiosk connection holds the `liu` engine from the moment it opens until a card is
+  pressed, and returns to it when the session ends. A client that skips the `language`
+  message is served by the `liu` engine. The kiosk's `/health` status also reflects
+  `liu` only.
+- The frontend loads `/core/vocab.json` (the `liu` vocabulary) for its on-screen labels
+  if `GET /languages` gave it no `vocab_url` for the selected card
+  (`assets/app.js`). This is a cross-language fallback in the browser, for labels only.
 
 ### 1.1 Contracts between blocks
 
@@ -136,8 +190,29 @@ IDLE ──hands enter frame──> ACTIVE ──motion below threshold for N ms
   └────hands leave frame───────┴────────────────────────────────────────────┘
 ```
 
-Thresholds are per-language and tuned on real recordings, never guessed — signing
-tempo differs between languages and between people.
+Word-boundary tuning is part of each language's engine (§1.1b), because signing tempo
+differs between languages and between people. A language's `segmentation` entry in
+`core/languages.json` may set any of `pause_ms`, `motion_threshold`, `hands_absent_ms`
+and `min_frames`. A key it leaves out takes the kiosk default from `kiosk/config.py`
+(500 ms, 0.02, 800 ms, 6 frames). Each connection builds a fresh segmenter from the
+selected language's values when the card is pressed (`LanguagePack.make_segmenter`).
+
+The design requires these values to be tuned on real recordings of that language and
+never guessed. The code does not meet that yet: no language sets a `segmentation` entry
+today, so `liu` and `asl` both run on the kiosk defaults, and `kiosk/config.py` says
+those defaults were tuned on synthetic data.
+
+Word-boundary tuning is part of a language's engine (§1.1b). A language's `segmentation`
+entry in `core/languages.json` may set any of `pause_ms`, `motion_threshold`,
+`hands_absent_ms` and `min_frames`; a key it leaves out takes the kiosk default from
+`kiosk/config.py`. Each connection builds its segmenter from the selected language's
+pack (`LanguagePack.make_segmenter`), so the segmenter changes together with the model.
+The state machine code is common to all languages; only the numbers differ.
+
+As built on 2026-10-11, no language sets a `segmentation` entry, so every language runs
+on the kiosk defaults, and `kiosk/config.py` says those defaults were tuned on
+synthetic data. The "tuned on real recordings" promise above is not met yet for any
+language.
 
 **Honest about the limit:** this reads *deliberate, paused signing* well and fluent
 connected signing poorly. Fluent signers do not pause between words.
@@ -155,27 +230,90 @@ ceiling.
 
 **Does:** utterance clip → gloss hypothesis with confidence.
 
-Transformer encoder over landmark sequences (see `docs/TRAINING.md`). One **shared
-backbone** with a **per-language head**, selected by the visitor's language choice.
+Transformer encoder over landmark sequences (see `docs/TRAINING.md`). **One complete
+model per language** (2026-10-11 revision, §1.1b). Each language has its own checkpoint
+holding every weight, encoder and classification layer alike, and its own label list.
+Languages share the model code (`ml/model.py`) and the feature encoding
+(`core/features.py`). They share no learned parameters.
 
-Rationale: sign languages differ in vocabulary but share the underlying structure of
-human signing — handshape, movement, spatial relationships. A shared backbone lets
-ASL's larger public data improve encoders that start with little or no public data of
-their own. Heads stay separate because the vocabularies are genuinely different
-languages, not dialects.
+**As built.** At process start `kiosk/languages.py` builds one `Recognizer` for every
+entry in `core/languages.json` that names both a `model` and a `vocab`. All of them
+stay loaded for the life of the process, and the language card decides which one a
+connection uses. A checkpoint that is missing, corrupt or missing required keys makes
+that one language not ready. The process still starts and the other languages are
+unaffected.
 
-**Language packs (2026-10 revision).** The visitor-facing language menu now lists nine
-cards — Jordan (LIU), Saudi, UAE, Omani, Qatari, French (LSF), American (ASL), British
-(BSL), International Sign — each its own head, dataset, and signer-recruitment effort,
-not a caption-language toggle. Only a language with a real (non-synthetic) dataset and
-a trained head is enabled; every other card opens to an explicit "recording in
-progress" state rather than running an untrained or synthetic-only head live. Which
-language is recruited next, after LIU, is an open decision (`docs/ROADMAP.md`) — the
-architecture does not need that decision made to support the menu.
+**Confidence bars are per language.** Each recogniser is built with its own reject
+threshold (below it there is no hypothesis) and confident threshold (below it the
+visitor is offered candidates instead of a committed word, FR-K8). A language sets them
+with `reject_threshold` and `confident_threshold` in its entry. Otherwise the kiosk
+defaults apply (0.55 and 0.80 in `kiosk/config.py`). Today `asl` sets a confident
+threshold of 0.88 and `liu` uses the defaults.
+
+**What this replaces, and what it costs.** The earlier revision of this section
+specified one shared backbone with a small per-language head. It had two reasons:
+
+1. *Memory.* One backbone plus N small heads is resident instead of N full models.
+2. *Transfer.* Sign languages share the structure of human signing (handshape,
+   movement, spatial relationships), so a shared backbone would let ASL's larger public
+   data improve languages that start with little or none of their own.
+
+Isolation gives up both. The cost in numbers, for the model as it is today:
+
+- The model has about 1.27 million parameters (1,267,436 plus 193 per label, counted
+  from `ml/model.py` at its default sizes with the 406-value input). A per-language head
+  would have been those 193 parameters per label. Everything else is the part the old
+  design shared.
+- A checkpoint is about 5.5 MB on disk (`models/signoo.pt` is 5,495,417 bytes,
+  `models/asl_pilot.pt` is 5,489,463 bytes).
+- As 32-bit floats the weights are about 5.1 MB per language in memory. Nine languages
+  are about 46 MB of weights, against about 5 MB for one shared backbone with nine
+  heads. Isolation therefore costs roughly 40 MB at nine languages, about 0.5% of the
+  8 GB budget.
+
+These are arithmetic from the parameter count and file sizes, not measurements. Nobody
+has measured recognition memory on the Jetson, with one language or with several, and
+a TensorRT engine per language carries working memory that this arithmetic does not
+cover. §4.2 says what must be measured. The cost also grows with the model: a model ten
+times larger makes isolation cost ten times more, so this decision must be revisited if
+the architecture grows.
+
+The transfer benefit is not replaced by anything today. Every model is trained from
+scratch (`ml/train.py` has no option to start from existing weights). Whether a
+language's own model may be initialised from weights pre-trained on another language's
+data, and then trained, gated and shipped as its own separate checkpoint, is an open
+decision for the owner (§8).
+
+What isolation buys: a change to one language cannot regress another, each gate verdict
+(B13) covers exactly one deployable file, a language can be added, retrained, rolled
+back or removed without touching the others, and there is no code path that can attach
+the wrong head to a visitor.
+
+**Language packs (2026-10 revision, amended 2026-10-11).** The visitor-facing language
+menu lists nine cards — Jordan (LIU), Saudi, UAE, Omani, Qatari, French (LSF), American
+(ASL), British (BSL), International Sign — each its own engine, dataset, and
+signer-recruitment effort, not a caption-language toggle. Only a language with a real
+(non-synthetic) dataset and a trained model of its own is enabled; every other card
+says "coming soon" rather than running an untrained or synthetic-only model live.
+Which language is recruited next, after LIU, is an open decision (`docs/ROADMAP.md`) —
+the architecture does not need that decision made to support the menu.
+
+The state of the nine entries on 2026-10-11: `liu` is `live`, `asl` is `pilot`, the
+other seven are `coming_soon` with no model. The `asl` model is marked as trained on
+real data (`kiosk/README.md` gives the source as PopSign). The `liu` model is
+`models/signoo.pt`, trained on synthetic data, and its entry says `"real_data": false`
+while its status is `live`. That contradicts the paragraph above and the project's
+non-negotiable rule, and the code does not prevent it: a card is pressable when its
+model and vocabulary load, whatever `real_data` says. The owner has to decide whether
+`liu` goes back to "coming soon" until real data exists.
 
 Rejection is a first-class output: anything beyond the rejection threshold returns *no
 hypothesis*, and the UI asks the visitor to sign again. A confident mistranslation is
-worse than an admitted failure (Requirements §6.3).
+worse than an admitted failure (Requirements §6.3). A model may also carry an
+`__other__` label meaning "none of my signs"; when that label wins, the result is a
+rejection, and the label is never shown or offered as a candidate
+(`kiosk/recognition.py`). Selecting a language that is not ready is refused in the same
+spirit, with the error `language_unavailable`, and the connection stays as it was.
 
 ### B5 — Assembly
 
@@ -195,6 +333,11 @@ A learned gloss→text model is Phase 5, once there is enough paired data to tra
 
 Low-confidence words are marked in the output structure so B6 can render them visibly
 uncertain rather than presenting a guess as fact.
+
+The dictionary is per language (§1.1b). Each engine has its own vocabulary file, named
+by `vocab` in its `core/languages.json` entry, and the assembler for a connection is
+rebuilt from that file when the card is pressed. A gloss that is not in the selected
+language's vocabulary is not looked up anywhere else.
 
 ### B6 — Output
 
@@ -217,6 +360,15 @@ the answer. **Retrieval-grounded, not open-ended**: out-of-scope questions get a
 visible refusal and a route to a human (FR-A5), because a plausible invented answer is
 the worst possible output for someone who cannot easily verify it.
 
+**The knowledge base is per language** (§1.1b). Each engine names its own file with
+`knowledge_base` in `core/languages.json`, and retrieval for a connection only ever
+searches the selected language's file. A language with no knowledge base, or an empty
+one, refuses every question with the same visible refusal as an out-of-scope question.
+It never answers from another language's content. This is the case for `asl` today:
+`kiosk/data/knowledge_base_asl.json` is an empty list. The phrasing model is common to
+all languages and is only ever given the facts retrieved from the selected language's
+knowledge base.
+
 The answer is constrained at generation time to short, concrete sentences using
 vocabulary present in the sign clip library, so B8 can render it completely. Words
 outside the library are flagged and fingerspelled.
@@ -234,6 +386,10 @@ can produce alone. The moment the network is slow or absent, it drops to the loc
 never a failed request the visitor has to retry. This is why B7 sits fully inside the
 offline guarantee in §1 despite preferring the network: the fallback is not a degraded
 mode bolted on afterward, it is the always-available floor the cloud path sits above.
+
+The local 3B model is not in the code. The fallback in `kiosk/dialogue.py` today returns
+the retrieved knowledge-base answer through a fixed template, with no local language
+model loaded, so the 2.5 GB reserved for it in §4.2 is not yet in use.
 
 ### B8 — Sign playback
 
@@ -265,6 +421,15 @@ still warns when knowledge-base text contains words with no recorded sequence (F
 Playback highlights each word as it plays, tying the signed and written answer
 together, same as before.
 
+**The clip library is per language** (§1.1b). Each engine names its own library with
+`clip_library` in `core/languages.json`, and playback for a connection only looks up
+the selected language's recordings. A sign recorded for one language is never played
+for another, even where the written word is the same, because the signs are different.
+A language with no clip library plays nothing back and reports every answer word as
+unrenderable. As built, every entry in both existing libraries (`core/clip_library.json`
+for `liu`, `core/clip_library_asl.json` for `asl`) has no recording, so playback shows
+the "not yet recorded" placeholder for every word in every language.
+
 **Open engineering question, not yet resolved:** the retargeting step (mapping a real
 signer's hand/body landmarks onto a rig that was not their own body) is nontrivial —
 proportions differ per signer, and getting it wrong reintroduces exactly the
@@ -292,7 +457,8 @@ existing blocks, not a new block:
 attract (presence auto-detected, no tap-to-start)
    → hi (greeting)
    → language (card grid, one card per language pack — §B4 "Language packs";
-      unready packs open to "recording in progress", not a live session)
+      pressing a ready card moves the session onto that language's whole engine,
+      §1.1b; an unready card says "coming soon" and cannot start a live session)
    → consent
    → active:translate (self-view camera box; two live caption boxes — the visitor's
       chosen language and English — fed by the existing B1→B6 pipeline, unchanged)
@@ -346,6 +512,30 @@ whether a candidate ships, which is entirely B13's job. A fast retraining cadenc
 without an equally firm gate is how a system quietly teaches itself its own mistakes
 (see B13).
 
+**Training is per language** (§1.1b). A candidate for a language is trained only on
+that language's reviewed data, from scratch, into its own checkpoint. No run reads
+another language's data or weights.
+
+As built (`server/training.py`, `server/scheduler.py`):
+
+- Only review items of that language with status `confirmed` or `corrected` are
+  exported. Items with no signer identity are left out.
+- The split is by signer. The first export for a language freezes its validation and
+  test signers in `server/runs/frozen_split.json` under that language's code. Later
+  exports keep them and send every new signer to train. Training refuses to run if a
+  frozen signer's data has disappeared, or if fewer than three signers exist.
+- The automatic cycle is real: the server starts a scheduler that checks hourly and
+  trains a candidate for a language when 72 hours have passed since that language's
+  last model. It runs once per language named in `SIGNOO_AUTO_TRAIN_LANGUAGES`. That
+  list defaults to `liu` only, so another language gets no automatic cycle until an
+  operator adds its code.
+- The scheduler will not start a language's cycle until that language's benchmark has
+  been frozen by a deliberate first run (`POST /training/trigger`).
+- A candidate is never promoted by this block.
+
+The module docstring at the top of `server/training.py` still says no automatic cycle
+exists. That comment is out of date; the scheduler is in the code.
+
 ### B13 — Registry and promotion gate
 
 **The safety-critical block.** Every model version is stored with the data snapshot and
@@ -363,15 +553,91 @@ into.
 Passing candidates shadow-run against live traffic before promotion. Rollback is one
 action, and automatic on live-metric degradation.
 
+**The registry and the gate are per language** (§1.1b). Every model version belongs to
+exactly one language. Each language has its own champion, and a candidate is judged
+only against the champion of its own language, on its own language's frozen benchmark
+signers, with a shadow evaluation on its own language's reviewed live items. A
+language's first model has no champion to beat, but must still pass the latency and
+shadow criteria. Passing the gate for one language says nothing about any other.
+
+As built (`server/gate.py`, `server/shadow.py`, `server/routers/registry.py`):
+
+- The champion lookup, the shadow window and the registry listing all filter by the
+  candidate's language.
+- Promotion is a separate action by an engineer or admin, allowed only for a version in
+  `shadow` status whose gate passed. Nothing automatic can promote.
+- `POST /training/trigger` accepts an explicit `champion_version`. In the committed
+  code it is not checked against the candidate's language. Uncommitted work on
+  2026-10-11 adds that check (a champion of another language is refused with 409
+  before any training starts); confirm it is merged before relying on it.
+- The false-accept criterion (DR-6 item 5) is not measured. `server/gate.py` treats it
+  as passed when either figure is missing, which is always, because the benchmark has
+  no non-signing clips.
+- The latency criterion is measured on the server's CPU, not on the Jetson.
+- The shadow evaluation is not a parallel run on live kiosks. It scores the candidate
+  on reviewed items newer than the candidate and compares that with what the kiosk's
+  model said at the time.
+- Automatic rollback on live-metric degradation is not built. Manual rollback changes
+  the version's status and does not move any kiosk back by itself.
+
 ### B14 — Knowledge base
 
 Per-site content for B7, edited in the console with preview of the signed rendering and
 warnings for unrenderable words.
 
+Under §1.1b this content is per language as well as per site: each language's engine
+answers only from its own knowledge base, and the unrenderable-word warning must be
+computed against that language's own vocabulary and clip library.
+
+The server does not do this yet. A knowledge-base entry has a `site_id` and no language
+(`server/models.py`). Every entry is written to one file,
+`kiosk/data/knowledge_base.json`, which is the `liu` engine's knowledge base, and the
+warning is computed from `core/vocab.json` and `core/clip_library.json`, which are the
+`liu` files (`server/config.py`, `server/kb.py`). So the console can only edit `liu`
+content, and any other language's knowledge base is a file edited by hand on the kiosk.
+
 ### B15 — Fleet control
 
 Staged rollout of software and models, health monitoring, remote diagnostics,
 automatic rollback. Never all kiosks at once.
+
+**Model rollout is per language** (§1.1b). A kiosk runs one model per ready language,
+so its fleet state is one installed version per language, and a rollout of a model
+moves only the engine of that model's language on the targeted kiosks. A new `asl`
+model must never replace or disturb the `liu` engine on the same kiosk.
+
+State of the code on 2026-10-11. This block is being built by two engineers today. The
+model-distribution parts below were read in the uncommitted working tree, were not run
+for this document, and are still changing, so check the code before relying on them:
+
+- Registration, heartbeat, the kiosk list and rollout creation exist
+  (`server/routers/fleet.py`). A rollout names a model version and a list of kiosk ids.
+  Uncommitted: only a `promoted` version can be rolled out, so a rollout cannot put an
+  ungated model on a kiosk.
+- The kiosk side of model distribution is written (`kiosk/model_sync.py`): after each
+  delivered heartbeat it asks the server, once per language that has a model
+  configured, whether a different version is assigned. It installs a download only if
+  the sha256 matches the server's header and the file loads as a checkpoint, then swaps
+  that one language's recogniser and records the version so a restart keeps it. A bad
+  download leaves the running model untouched.
+- The server endpoint that answers that request is written, uncommitted
+  (`GET /fleet/kiosks/{kiosk_id}/model?language=<code>`). It answers with the model of
+  the newest active rollout that targets the kiosk and whose model is of the requested
+  language, so a rollout of one language's model never changes what a kiosk is told to
+  run for another. The contract is in `docs/API_CONTRACTS.md` §10.
+- The kiosk sends `model_versions` (language code to installed version) in its
+  heartbeat and the server stores it per kiosk.
+- The older single-language fields remain: a kiosk record has one `language` and one
+  `current_model_version`, and the kiosk always registers as `liu`. A rollout updates
+  `current_model_version` only when the model's language equals the kiosk's registered
+  language.
+- A rollout is never closed or superseded in code: nothing sets a rollout's status to
+  anything but `active`, so "most recent active rollout" is in practice "most recent
+  rollout", and moving a kiosk back means creating a new rollout of the older version.
+- Staging, health-based automatic rollback and remote diagnostics are not built.
+- The transport is not mTLS. Kiosk calls carry a shared secret in the `X-Kiosk-Token`
+  header (`docs/API_CONTRACTS.md` §9), which identifies the fleet, not the individual
+  kiosk.
 
 ### B16 — Console API
 
@@ -406,16 +672,53 @@ happen after text appears.
 ```
 OS + display + application        ~1.5 GB
 perception                        ~0.6 GB
-recognition (one active language) ~0.2 GB
+recognition (all ready languages) ~0.2 GB
 answering model (3B quantised)    ~2.5 GB
 speech synthesis                  ~0.2 GB
-buffers + clip library + slack    ~1.0 GB
+buffers + clip libraries + slack  ~1.0 GB
                                  ────────
                                   ~6.0 GB  of 8 GB shared
 ```
 
 Models load once at startup. Memory growth is monitored, not assumed absent — a kiosk
 runs for weeks, and leaks surface on day nine, not in a demo.
+
+**Recognition under one engine per language (2026-10-11).** The recognition line used
+to read "one active language". The kiosk as built keeps every ready language's model
+loaded at once, so the line now covers all of them. What that means in plain numbers:
+
+| | Per language | Nine languages |
+|---|---|---|
+| Checkpoint on disk | about 5.5 MB | about 50 MB |
+| Weights in memory (32-bit floats, 1.27 million parameters) | about 5.1 MB | about 46 MB |
+| Share of the 8 GB budget | about 0.06% | about 0.6% |
+
+The inference runtime (PyTorch today) is loaded once however many languages there are,
+and it is most of the 0.2 GB. Each additional language adds about 5 MB of weights. By
+this arithmetic nine isolated models fit inside the existing 0.2 GB line, the total
+stays at about 6.0 GB, and isolation costs about 40 MB more than the shared-backbone
+design it replaced (B4).
+
+**None of this has been measured on the Jetson.** Every figure in this section is an
+estimate, and the per-language figures are arithmetic from the parameter count and the
+file sizes on a development machine. Before a second language goes live on a device,
+measure resident memory on the Jetson, at thermal steady state, with every ready
+language loaded. The things the arithmetic does not cover:
+
+- **TensorRT.** The design converts recognition to TensorRT (§5), and that conversion
+  has not been done. Each language would be its own engine with its own execution
+  context and working memory. That overhead per engine is unknown and may be larger
+  than the weights.
+- **Clip libraries.** Every language has its own (B8). Once real motion is recorded,
+  their size grows with words times languages and will probably exceed the models. The
+  1.0 GB line was written for one library.
+- **Knowledge bases and vocabularies.** Per language, and small.
+- **The answering model.** The 2.5 GB line is a reservation. No local model is loaded
+  today (B7).
+
+If the measurement shows that all ready languages do not fit, the fallback is to load a
+language's engine when its card is pressed and unload the least recently used one. That
+costs a visible wait on the language screen and is not built.
 
 ---
 
@@ -444,10 +747,14 @@ Designed for, not discovered later.
 | Answering service down | Same fallback path |
 | Camera disconnects | Visible out-of-service screen; alert to console; automatic recovery on reconnect |
 | Perception too slow (thermal) | Drop to lower frame rate, keep serving, alert. Never queue frames |
-| Memory pressure | Unload the answering model first — recognition is the core service, answering is the enhancement |
-| Model file corrupt | Refuse to start with that model; fall back to the previously known-good version |
-| Promotion gate rejects candidate | Champion stays; reason recorded; alert if rejections repeat, since that means the review pipeline is producing bad data |
-| Bad model promoted anyway | Automatic rollback on live-metric degradation; one-action manual rollback |
+| Memory pressure | Unload the answering model first — recognition is the core service, answering is the enhancement. Never free memory by serving one language with another language's model. Not built: nothing in the kiosk unloads anything today |
+| Model file corrupt | Refuse to load that model. Only that language becomes not ready; its card cannot be pressed and the other languages keep working. Fall back to the previously known-good version *of the same language*, never to another language's model. As built: a rolled-out model that fails to load falls back to that language's factory checkpoint, and a factory checkpoint that fails leaves the language not ready. No older rolled-out version is kept |
+| Visitor selects a language with no trained model | Refused with `language_unavailable`; the session stays where it was. The card should already be disabled and say "coming soon" |
+| Selected language has no knowledge base | Every question gets the visible refusal and the route to a human. Never answered from another language's knowledge base |
+| Selected language has no clip library, or a word has no recording | Nothing is played for it; the word is shown as not yet recorded. Never another language's sign, never a generated one |
+| Downloaded model fails its sha256 or will not load | Discarded. The running model for that language is untouched; other languages are not involved |
+| Promotion gate rejects candidate | That language's champion stays; reason recorded; alert if rejections repeat, since that means the review pipeline is producing bad data. Other languages' champions are not affected either way |
+| Bad model promoted anyway | Automatic rollback on live-metric degradation; one-action manual rollback. Both act on one language. As built: the automatic rollback does not exist, and the manual one changes the registry status without moving any kiosk |
 | Visitor walks away mid-session | Timeout with visible countdown; session erased; return to clean idle |
 | Reviewer queue backs up | Alert; training simply uses less new data. Never auto-approves to clear a backlog |
 
@@ -489,3 +796,16 @@ Carried into the question round rather than silently decided:
 4. ~~Fluent vs word-by-word~~ — **resolved:** fluent is the target. Sequenced as
    Roadmap Phase 4.5, gated on continuous-signing data volume, not on a date.
 5. **Deployment sites** — one site or several, and do they share a knowledge base?
+   Since 2026-10-11 a knowledge base is also per language (§1.1b), so the question is
+   per site and per language.
+6. **Cross-language pre-training (opened 2026-10-11).** With one isolated model per
+   language, may a language's model start from weights pre-trained on another
+   language's data, as long as it is then trained, gated and shipped as its own
+   checkpoint? The shared backbone existed partly for this transfer (B4). Nothing in
+   the code does it today.
+7. **LIU's card (opened 2026-10-11).** `liu` is live on a model trained on synthetic
+   data, against the rule that such a language says "coming soon" (B4). Take it off the
+   menu until real data exists, or accept it as a development-only state?
+8. **Memory with every language loaded (opened 2026-10-11).** Not measured on the
+   Jetson (§4.2). If it does not fit, loading on selection is the fallback, at the
+   price of a wait on the language screen.
