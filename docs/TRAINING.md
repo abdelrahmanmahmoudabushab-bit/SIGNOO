@@ -250,11 +250,36 @@ word" are clips where hand tracking found a hand in only a few frames; segmentat
 cannot recover those.
 
 **Refusal is the bigger problem.** On 30 clips of two signs the model was never taught
-(bird, book), it named one of its 8 signs **80% of the time**, mostly above the 0.80
-commit threshold. A closed vocabulary must name something for anything it sees. The fix
-is an explicit `__other__` class trained on signs outside the vocabulary
-(`ml/make_open_set.py`), read by the kiosk as a rejection (`kiosk/recognition.py`),
-and tested on unknown signs held completely out of training.
+(book, drink), it named one of its 8 signs about **80% of the time**. A closed vocabulary
+must name something for anything it sees.
+
+*Tried, did not work:* an explicit `__other__` class trained on four other signs
+(`ml/make_open_set.py`; the kiosk reads that class as a refusal). On unknown signs it
+had never seen it still accepted 77%, and known-sign accuracy did not improve, so it
+was not promoted. Four negative signs teach "refuse these four", not "refuse anything
+unfamiliar". Model confidence separates known from unknown only weakly (AUROC 0.755; the
+`__other__` model scored 0.699).
+
+*Mitigation in place:* a per-language commit bar (`confident_threshold` in
+`core/languages.json`), 0.88 for the 8-sign pilot, so uncertain signs become candidates
+the visitor taps instead of an automatic word. Measured through the live path on 119
+held-out clips (`python -m kiosk.replay`):
+
+| Known signs (89 clips) | |
+|---|---|
+| committed and correct | 67% |
+| committed but wrong | 6% |
+| shown as candidates, correct sign among them | 12% |
+| no word (hand tracking found no hand) | 13% |
+
+| Unknown signs (30 clips) | |
+|---|---|
+| committed as a known sign (false accept) | **47%** |
+| shown as candidates | 37% |
+| refused | 10% |
+
+That 47% is still too high to call safe. It will not come down by threshold tuning on an
+8-sign vocabulary; it needs a much larger vocabulary and many diverse negative signs.
 
 **Limits.** 8 signs. Phone selfie video, not the kiosk camera, so accuracy on the
 kiosk will differ and has not been measured. Not reviewed by Deaf ASL signers. The
