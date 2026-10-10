@@ -73,7 +73,16 @@ server/.venv/Scripts/python.exe -m uvicorn server.main:app --port 8001
 # console
 cd console && npm test -- --run
 cd console && npm run dev
+
+# everything at once (run alone; the server's gate tests train models and need free RAM)
+scripts/test-all.sh          # or: scripts/test-all.sh fast
 ```
+
+Deployment settings that matter (details in `server/README.md` and `kiosk/README.md`):
+server refuses to start without `SIGNOO_JWT_SECRET` and `SIGNOO_KIOSK_TOKEN` (or
+`SIGNOO_ENV=dev`); a kiosk reports to the server only when `SIGNOO_SERVER_URL` is set,
+sending `SIGNOO_KIOSK_TOKEN`. Each sign language has its own model, listed in
+`core/languages.json`; a language is pressable only when its checkpoint loads.
 
 Windows: set `PYTHONIOENCODING=utf-8` before running anything in `ml/` directly — the
 console defaults to cp1252 and crashes on Arabic text. `kiosk/session.py`'s logger
