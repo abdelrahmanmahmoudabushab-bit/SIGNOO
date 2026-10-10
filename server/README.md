@@ -137,6 +137,7 @@ only; `dev` is also what the tests use). Anything not `dev` is treated as produc
 | `SIGNOO_DATABASE_URL` | Postgres in production; SQLite only for local dev. |
 | `SIGNOO_CORS_ORIGINS` | Comma-separated console origins allowed to call the API. Empty = same-origin only. |
 | `SIGNOO_AUTO_TRAIN`, `_HOURS`, `_POLL_MIN` | The 3-day candidate cycle (on by default, 72 h). |
+| `SIGNOO_AUTO_TRAIN_LANGUAGES` | Comma-separated language codes the cycle trains (default `liu`). Each language has its own reviewed data, frozen benchmark, champion and gate; nothing is shared between them. |
 | `SIGNOO_SHADOW_MIN_ITEMS` | Reviewed live items a candidate needs before its shadow run can be judged (30). |
 
 Generate secrets with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.

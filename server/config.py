@@ -65,7 +65,11 @@ class Settings:
     auto_train_enabled: bool = os.environ.get("SIGNOO_AUTO_TRAIN", "1") == "1"
     auto_train_interval_hours: float = float(os.environ.get("SIGNOO_AUTO_TRAIN_HOURS", "72"))
     auto_train_poll_minutes: float = float(os.environ.get("SIGNOO_AUTO_TRAIN_POLL_MIN", "60"))
-    auto_train_languages: tuple[str, ...] = ("liu",)
+    # Each language trains its own candidate from its own reviewed data and is gated
+    # against its own champion and its own frozen benchmark; they never mix.
+    auto_train_languages: tuple[str, ...] = tuple(
+        code.strip() for code in os.environ.get("SIGNOO_AUTO_TRAIN_LANGUAGES", "liu").split(",") if code.strip()
+    )
 
     # FR-L7 shadow evaluation: how many reviewed live items, newer than the candidate,
     # it must be scored on, and how far below the champion it may fall.
