@@ -1,0 +1,10 @@
+[
+  {"id": "dog",      "ar": "كلب",    "en": "dog"},
+  {"id": "fish",     "ar": "سمكة",   "en": "fish"},
+  {"id": "car",      "ar": "سيارة",  "en": "car"},
+  {"id": "airplane", "ar": "طائرة",  "en": "airplane"},
+  {"id": "cat",      "ar": "قطة",    "en": "cat"},
+  {"id": "apple",    "ar": "تفاحة",  "en": "apple"},
+  {"id": "blue",     "ar": "أزرق",   "en": "blue"},
+  {"id": "red",      "ar": "أحمر",   "en": "red"}
+]

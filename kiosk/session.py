@@ -57,11 +57,11 @@ def configure_logging(level: int = logging.INFO) -> None:
 
 
 class SessionState(str, enum.Enum):
-    ATTRACT = "attract"        # idle screen, FR-K1
+    ATTRACT = "attract"        # idle screen, FR-K1 (the browser's "Hello" screen)
     LANGUAGE = "language"       # FR-K2
     CONSENT = "consent"         # FR-K3
-    ACTIVE = "active"           # capturing/recognising/answering, FR-K4-K12
-    ENDED = "ended"             # FR-K13
+    ACTIVE = "active"           # capturing/recognising/answering, FR-K4-K12 (Translate + Ask)
+    ENDED = "ended"             # FR-K13 (the browser's "Thank you" screen)
 
 
 @dataclass

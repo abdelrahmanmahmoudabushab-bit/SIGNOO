@@ -29,6 +29,8 @@ Server -> client:
 
     {"type": "state", "session_state": "attract|language|consent|active|ended",
      "correlation_id": "..."}
+        # attract = the browser's Hello screen; ended = its Thank-you screen.
+        # Presence auto-detect and the thank-you animation are client-side only.
     {"type": "landmarks", "pose": [[x,y,z],...] | null, "left": ... | null, "right": ... | null}
     {"type": "framing", "ok": true|false, "reason": "no_body"|"hands_out_of_frame"|null}
     {"type": "hypothesis", "status": "committed"|"candidates"|"rejected",
@@ -56,12 +58,14 @@ from fastapi.staticfiles import StaticFiles
 from core.contracts import Hypothesis
 from kiosk.assembly import Assembler, Vocabulary
 from kiosk.config import CONFIG, REPO_ROOT
-from kiosk.data_capture import CapturedItem, SessionCapture, write_pending_upload
+from kiosk.data_capture import (
+    CapturedItem, SessionCapture, flush_pending_uploads, write_pending_upload,
+)
 from kiosk.dialogue import Dialogue, KnowledgeBase
 from kiosk.output import TTSEngine
 from kiosk.perception import HolisticPerception, PerceptionUnavailable, decode_base64_frame
 from kiosk.playback import ClipLibrary
-from kiosk.recognition import ModelUnavailable, Recognizer
+from kiosk.languages import LanguageRegistry
 from kiosk.segmentation import Segmenter
 from kiosk.session import Session, SessionState, configure_logging, telemetry_snapshot
 import json
@@ -77,27 +81,52 @@ _clip_library = ClipLibrary(CONFIG.clip_library_path, _vocab)
 _kb = KnowledgeBase(CONFIG.knowledge_base_path)
 _tts = TTSEngine(enabled=CONFIG.tts_enabled)
 
-try:
-    _recognizer: Recognizer | None = Recognizer(
-        CONFIG.model_path, CONFIG.reject_threshold, CONFIG.confident_threshold, CONFIG.top_k_alternatives
-    )
-    logger.info("model_loaded", extra={"path": str(CONFIG.model_path), "labels": len(_recognizer.labels)})
-except ModelUnavailable as exc:
-    # SYSTEM_DESIGN.md §6: "Model file corrupt -> refuse to start with that model".
-    # We don't refuse to start the whole process (the frontend still needs to serve
-    # a clear out-of-service state) but recognition is unavailable until fixed.
-    _recognizer = None
-    logger.error("model_unavailable", extra={"error": str(exc)})
+# One model + vocabulary per sign language (core/languages.json). A corrupt or missing
+# checkpoint leaves that one language unavailable (SYSTEM_DESIGN.md §6) rather than
+# stopping the process: the frontend still needs to serve a clear out-of-service state.
+DEFAULT_LANGUAGE = "liu"
+registry = LanguageRegistry(
+    CONFIG.languages_path, REPO_ROOT,
+    CONFIG.reject_threshold, CONFIG.confident_threshold, CONFIG.top_k_alternatives,
+    model_overrides={DEFAULT_LANGUAGE: CONFIG.model_path},   # keeps SIGNOO_MODEL_PATH working
+)
+
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _schedule_flush() -> None:
+    """Delivers queued sessions to server/ off the event loop, never blocking a
+    visitor; a no-op unless SIGNOO_SERVER_URL is set."""
+    if not CONFIG.server_url:
+        return
+    task = asyncio.create_task(asyncio.to_thread(
+        flush_pending_uploads, CONFIG.pending_uploads_dir, CONFIG.server_url
+    ))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+@app.on_event("startup")
+async def _flush_on_startup() -> None:
+    _schedule_flush()   # retry anything a previous run could not deliver
 
 
 @app.get("/health")
 def health() -> dict:
+    default = registry.get(DEFAULT_LANGUAGE)
     return {
-        "status": "ok" if _recognizer is not None else "degraded",
-        "model_loaded": _recognizer is not None,
-        "labels": len(_recognizer.labels) if _recognizer else 0,
+        "status": "ok" if default is not None and default.ready else "degraded",
+        "model_loaded": default is not None and default.ready,
+        "labels": default.summary()["labels"] if default else 0,
+        "languages": registry.summary(),
         "telemetry": telemetry_snapshot(),
     }
+
+
+@app.get("/languages")
+def languages() -> list[dict]:
+    """Which language cards can be pressed: ready, status, and where its vocabulary is."""
+    return registry.summary()
 
 
 class KioskConnection:
@@ -108,7 +137,8 @@ class KioskConnection:
     def __init__(self, ws: WebSocket):
         self.ws = ws
         self.session = Session(kiosk_id=CONFIG.kiosk_id)
-        self.assembler = Assembler(_vocab)
+        self.pack = registry.get(DEFAULT_LANGUAGE)
+        self.assembler = Assembler(self._vocab_for(self.pack))
         self.dialogue = Dialogue(
             _kb, CONFIG.kb_similarity_floor, CONFIG.claude_model, CONFIG.claude_timeout_s,
             CONFIG.dialogue_cloud_enabled, _vocab, _clip_library._entries,
@@ -129,6 +159,10 @@ class KioskConnection:
         self.perception: HolisticPerception | None = None
         self.pending_candidates: list[tuple[str, float]] | None = None
 
+    @staticmethod
+    def _vocab_for(pack) -> Vocabulary:
+        return pack.vocab if pack is not None and pack.vocab is not None else _vocab
+
     async def send(self, message: dict) -> None:
         await self.ws.send_text(json.dumps(message, ensure_ascii=False))
 
@@ -141,16 +175,26 @@ class KioskConnection:
 
     async def handle(self, message: dict) -> None:
         msg_type = message.get("type")
-        if msg_type != "ping":
-            # A bare keep-alive ping must not reset the idle clock (FR-K13) — only
-            # real interaction (language/consent/frame/control/...) counts as
-            # activity. Otherwise a visitor who has walked away but left the tab
-            # open would never time out.
+        if msg_type not in ("ping", "frame"):
+            # Neither a keep-alive ping nor a bare camera frame is activity (FR-K13):
+            # the browser streams frames for as long as the tab is open, so counting
+            # them would mean a visitor who walked away never times out. A frame
+            # counts only when it shows hands (see _handle_frame).
             self.session.touch()
 
         if msg_type == "language":
-            self.session.language = message.get("lang")
-            self.capture.language = self.session.language
+            code = message.get("lang")
+            pack = registry.get(code)
+            if pack is None or not pack.ready:
+                # Never fall back to another language's model: a visitor who picked
+                # American must not be recognised by the Jordanian model, or vice versa.
+                await self.send({"type": "error", "code": "language_unavailable",
+                                 "message": f"{code!r} has no trained model yet"})
+                return
+            self.pack = pack
+            self.assembler = Assembler(self._vocab_for(pack))
+            self.session.language = code
+            self.capture.language = code
             self.session.transition(SessionState.LANGUAGE, language=self.session.language)
             await self.send_state()
 
@@ -214,7 +258,8 @@ class KioskConnection:
         if landmarks is None:
             return
 
-        hands_present = landmarks.left is not None or landmarks.right is not None
+        if landmarks.left is not None or landmarks.right is not None:
+            self.session.touch()   # a visitor signing is activity; an empty room is not
         await self.send({
             "type": "landmarks",
             "pose": landmarks.pose.tolist() if landmarks.pose is not None else None,
@@ -230,7 +275,8 @@ class KioskConnection:
         utterance = self.segmenter.feed(landmarks)
         if utterance is None:
             return
-        if _recognizer is None:
+        recognizer = self.pack.recognizer if self.pack is not None else None
+        if recognizer is None:
             await self.send({"type": "error", "code": "model_unavailable",
                               "message": "no recognition model is loaded"})
             return
@@ -243,7 +289,7 @@ class KioskConnection:
         # a word boundary is detected. classify() is pure/read-only (model in
         # .eval() + torch.no_grad(), no shared state) so running it in a
         # worker thread is safe.
-        hypothesis: Hypothesis = await asyncio.to_thread(_recognizer.classify, utterance)
+        hypothesis: Hypothesis = await asyncio.to_thread(recognizer.classify, utterance)
         await self._handle_hypothesis(hypothesis, utterance)
 
     async def _handle_hypothesis(self, hypothesis: Hypothesis, utterance) -> None:
@@ -356,6 +402,8 @@ class KioskConnection:
         self.session.transition(SessionState.ENDED, uploaded_to=str(target) if target else None)
         await self.send({"type": "session_reset"})
         self._reset_for_next_visitor()
+        if target:
+            _schedule_flush()
 
     def _reset_for_next_visitor(self) -> None:
         """NFR-S3: session data is erased on return to idle. A person who walks
@@ -365,7 +413,8 @@ class KioskConnection:
         if self.perception is not None:
             self.perception.close()
             self.perception = None
-        self.assembler.clear()
+        self.pack = registry.get(DEFAULT_LANGUAGE)
+        self.assembler = Assembler(self._vocab_for(self.pack))
         self.segmenter.reset()
         self.pending_candidates = None
         old_kiosk_id = self.session.kiosk_id
@@ -394,12 +443,14 @@ async def ws_session(ws: WebSocket) -> None:
     conn = KioskConnection(ws)
     logger.info("session_started", extra={"correlation_id": conn.session.correlation_id})
     await conn.send_state()
+    last_idle_check = time.monotonic()
     try:
         while True:
             try:
                 raw = await asyncio.wait_for(ws.receive_text(), timeout=2.0)
             except asyncio.TimeoutError:
                 await conn.check_idle()
+                last_idle_check = time.monotonic()
                 continue
             try:
                 message = json.loads(raw)
@@ -407,6 +458,11 @@ async def ws_session(ws: WebSocket) -> None:
                 await conn.send({"type": "error", "code": "bad_json", "message": "not valid JSON"})
                 continue
             await conn.handle(message)
+            # While the camera streams, the receive above never times out, so the
+            # idle check has to run on the clock, not only on silence.
+            if time.monotonic() - last_idle_check >= 2.0:
+                await conn.check_idle()
+                last_idle_check = time.monotonic()
     except WebSocketDisconnect:
         logger.info("session_disconnected", extra={"correlation_id": conn.session.correlation_id})
     finally:

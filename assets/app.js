@@ -76,13 +76,33 @@ function toast(msg) {
 
 // ── vocabulary (single source of truth: core/vocab.json, per docs/API_CONTRACTS.md §1) ──
 let vocab = new Map();
-async function loadVocab() {
+async function loadVocab(url = '/core/vocab.json') {
   try {
-    const res = await fetch('/core/vocab.json');
+    const res = await fetch(url);
     const entries = await res.json();
     vocab = new Map(entries.map(e => [e.id, e]));
   } catch {
     vocab = new Map();   // candidate buttons fall back to showing the raw gloss id
+  }
+}
+
+// ── which language cards can be pressed ─────────────────────────────────────────
+// The backend (kiosk/languages.py) is the authority: a card is pressable only when
+// that language's own model loaded. Cards stay as the HTML has them if it can't answer.
+const languageInfo = new Map();
+async function loadLanguages() {
+  try {
+    const res = await fetch('/languages');
+    for (const lang of await res.json()) {
+      languageInfo.set(lang.code, lang);
+      const card = document.querySelector(`.lang-card[data-lang="${lang.code}"]`);
+      if (!card) continue;
+      card.disabled = !lang.ready;
+      const badge = card.querySelector('.lang-soon');
+      if (badge && lang.ready) badge.textContent = lang.status === 'pilot' ? 'تجريبية · Pilot' : '';
+    }
+  } catch {
+    // leave the cards as marked in index.html
   }
 }
 
@@ -446,6 +466,8 @@ function wireEvents() {
     card.onclick = () => {
       selectedLang = card.dataset.lang;
       applyLanguageLocale(selectedLang);
+      // The chosen language's own vocabulary labels its candidate buttons and captions.
+      loadVocab(languageInfo.get(selectedLang)?.vocab_url || '/core/vocab.json');
       send({ type: 'language', lang: selectedLang });
       showView('consent');
     };
@@ -495,6 +517,7 @@ function wireEvents() {
 
 async function init() {
   await loadVocab();
+  await loadLanguages();   // before wireEvents: only ready cards get a click handler
   wireEvents();
   connect();
   enterHello();

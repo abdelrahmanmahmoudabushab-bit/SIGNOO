@@ -112,19 +112,22 @@ a boundary" rule at the process boundary too, not just between Python modules.
   are reported as the string `"unavailable"`.
 - **B10 Data capture** (`kiosk/data_capture.py`) — on `consent_retention=true`,
   buffers landmarks/predictions/corrections in exactly `docs/API_CONTRACTS.md §4`'s
-  shape to `kiosk/data/pending_uploads/<session_id>.json`. **Deliberately not
-  wired to POST to `server/`** — the delegated plan explicitly scopes that out of
-  Phase 2 ("you don't need `server/` to exist or be running to build this"). If
-  wanted next: an `httpx` POST to `server/`'s B11 ingest endpoint on
-  `_end_session()`, with the local file kept as the retry queue on failure
-  (store-and-forward, per `SYSTEM_DESIGN.md`'s fleet-transport row) — not built
-  here, noted as deferred.
+  shape to `kiosk/data/pending_uploads/<session_id>.json`. **Upload is wired
+  (2026-10-10)** as store-and-forward: set `SIGNOO_SERVER_URL` (e.g.
+  `http://localhost:8001`) and each finished session, plus anything left over at
+  startup, is POSTed to `server/`'s `/ingest/sessions` off the event loop
+  (`flush_pending_uploads`, stdlib `urllib`). A file is deleted only after a 2xx;
+  offline or rejected files stay queued. Left blank, nothing leaves the device.
+  Every item carries an anonymous `visitor-<8 hex>` `signer_id` (one visit = one
+  signer) so the server's signer-independent split works without identifying anyone.
 
 ## Frontend
 
-`index.html` was rewritten into the five-screen visitor flow (attract → language
-→ consent → capture → answer), `assets/app.js` into the WebSocket client driving
-it, `assets/vision.js` trimmed to pure canvas drawing (perception moved
+`index.html` is the six-screen visitor flow (hello → language → consent → capture →
+answer → thank-you). `hello` (camera-based presence auto-detect) and `thank-you` are
+client-side only: the backend's `SessionState` still has just
+`attract|language|consent|active|ended` (see `docs/ROADMAP.md` drift item 6).
+`assets/app.js` is the WebSocket client driving it, `assets/vision.js` trimmed to pure canvas drawing (perception moved
 server-side, so the old in-browser MediaPipe loader is gone), `assets/kiosk.css`
 added for the new screens. `assets/recognizer.js` (the old client-side
 nearest-neighbour classifier) was deleted — confirmed unused by `record.js`

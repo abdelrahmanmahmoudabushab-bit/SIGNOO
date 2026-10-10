@@ -44,6 +44,13 @@ class Config:
     )
     top_k_alternatives: int = field(default_factory=lambda: _env_int("SIGNOO_TOP_K", 3))
 
+    # Which sign languages exist, and each one's model + vocabulary (kiosk/languages.py).
+    languages_path: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("SIGNOO_LANGUAGES_PATH", str(REPO_ROOT / "core" / "languages.json"))
+        )
+    )
+
     # B3 Segmentation — thresholds as config, per SYSTEM_DESIGN.md B3, never guessed
     # in code. Tuned on synthetic data for now; real values need real recordings.
     segmentation_pause_ms: int = field(
@@ -109,6 +116,9 @@ class Config:
         )
     )
     kiosk_id: str = field(default_factory=lambda: os.environ.get("SIGNOO_KIOSK_ID", "kiosk-dev-01"))
+    # Base URL of server/ (e.g. http://localhost:8001). Blank = sessions stay queued
+    # on disk and nothing leaves the device.
+    server_url: str = field(default_factory=lambda: os.environ.get("SIGNOO_SERVER_URL", ""))
 
     # Perception — every second captured frame, per SYSTEM_DESIGN.md B2 budget.
     perception_stride: int = field(default_factory=lambda: _env_int("SIGNOO_PERCEPTION_STRIDE", 2))
