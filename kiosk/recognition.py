@@ -25,6 +25,12 @@ if str(_ML_DIR) not in sys.path:
     sys.path.insert(0, str(_ML_DIR))
 
 
+# A model trained with this label learns "none of my signs". Answering it is a refusal,
+# which is how a closed vocabulary avoids naming a known sign for something it was
+# never taught. Built by ml/make_open_set.py.
+OTHER_LABEL = "__other__"
+
+
 class ModelUnavailable(RuntimeError):
     """Raised when the checkpoint is missing or corrupt (SYSTEM_DESIGN.md §6:
     "Model file corrupt -> refuse to start with that model"). The caller decides
@@ -84,11 +90,12 @@ class Recognizer:
             probs = torch.softmax(logits, dim=-1).squeeze(0).numpy()
 
         order = np.argsort(probs)[::-1]
-        top = order[: self.top_k]
-        alternatives = [(self.labels[i], float(probs[i])) for i in top]
-        best_label, best_prob = alternatives[0]
+        best_label, best_prob = self.labels[order[0]], float(probs[order[0]])
+        # The "other" class is never a word to show or a candidate to offer.
+        alternatives = [(self.labels[i], float(probs[i])) for i in order
+                        if self.labels[i] != OTHER_LABEL][: self.top_k]
 
-        if best_prob < self.reject_threshold:
+        if best_label == OTHER_LABEL or best_prob < self.reject_threshold:
             return Hypothesis(gloss=None, confidence=best_prob, alternatives=alternatives)
         return Hypothesis(gloss=best_label, confidence=best_prob, alternatives=alternatives)
 

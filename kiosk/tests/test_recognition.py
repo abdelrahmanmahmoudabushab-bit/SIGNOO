@@ -20,8 +20,8 @@ from core.features import FRAME_DIM
 from kiosk.recognition import ModelUnavailable, Recognizer
 
 
-def _make_checkpoint(tmp_path: Path, biases: list[float]) -> Path:
-    label_names = [f"sign_{i}" for i in range(len(biases))]
+def _make_checkpoint(tmp_path: Path, biases: list[float], names: list[str] | None = None) -> Path:
+    label_names = names or [f"sign_{i}" for i in range(len(biases))]
     # ml/train.py saves labels as ml/data.py's label_index() dict ({sign_id: index}),
     # never a plain list — match that shape exactly, or this test would pass for a
     # format the real training pipeline never produces.
@@ -47,6 +47,19 @@ def _dummy_utterance(n_frames: int = 10) -> Utterance:
         for i in range(n_frames)
     ]
     return Utterance(landmarks=landmarks, t_start=0, t_end=landmarks[-1].ts_ms)
+
+
+def test_the_other_class_is_a_rejection_even_when_it_is_very_confident(tmp_path):
+    """A model trained to say "not one of my signs" must be read as a refusal to
+    answer, never shown to the visitor as a word, and never offered as a candidate."""
+    checkpoint = _make_checkpoint(tmp_path, biases=[0.0, 0.0, 10.0], names=["a", "b", "__other__"])
+    recognizer = Recognizer(checkpoint, reject_threshold=0.55, confident_threshold=0.8, top_k=3)
+
+    hypothesis = recognizer.classify(_dummy_utterance())
+
+    assert hypothesis.gloss is None
+    assert hypothesis.confidence > 0.9                      # it IS sure: sure it is not a known sign
+    assert "__other__" not in [label for label, _ in hypothesis.alternatives]
 
 
 def test_low_confidence_is_rejected_not_guessed(tmp_path):
