@@ -1,0 +1,139 @@
+"""Replays recorded videos through the kiosk's real B2 -> B3 -> B4 path (NFR-N1).
+
+    python -m kiosk.replay data/popsign/raw --language asl --signers 7003 7007
+
+Each frame is resized and JPEG-encoded the way the browser sends it, paced at the
+video's frame rate, and fed to the same live-stream perception, pause-based
+segmenter and per-language recognizer the kiosk uses. That is what separates this
+from `ml/evaluate.py`, which scores pre-extracted features and so cannot see the
+failures that only exist live: a word the segmenter never closes, one it splits in
+two, or perception losing the hand mid-sign.
+
+Videos are expected as `<root>/<signer>/<sign>/<clip>.mp4`; the folder names are the
+ground truth.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+
+from kiosk.config import CONFIG, REPO_ROOT
+from kiosk.languages import LanguageRegistry
+from kiosk.perception import HolisticPerception
+from kiosk.segmentation import Segmenter
+
+MAX_SIDE = 640          # what a browser canvas sends, not the camera's native size
+JPEG_QUALITY = 70
+TAIL_SECONDS = 1.5      # still frames after the clip, so a final pause can close the word
+
+
+def replay_video(path: Path, recognizer, realtime: bool = True) -> list:
+    """Returns one Hypothesis per utterance the segmenter emitted for this video."""
+    import cv2
+
+    segmenter = Segmenter(
+        pause_ms=CONFIG.segmentation_pause_ms,
+        motion_threshold=CONFIG.segmentation_motion_threshold,
+        hands_absent_ms=CONFIG.segmentation_hands_absent_ms,
+        min_frames=CONFIG.min_utterance_frames,
+    )
+    perception = HolisticPerception(stride=CONFIG.perception_stride)
+    cap = cv2.VideoCapture(str(path))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    hypotheses = []
+    last_jpeg = None
+    index = 0
+
+    def feed(jpeg: bytes) -> None:
+        nonlocal index
+        perception.submit_frame(jpeg, int(index * 1000 / fps))
+        index += 1
+        landmarks = perception.latest()
+        if landmarks is None:
+            return
+        utterance = segmenter.feed(landmarks)
+        if utterance is not None:
+            hypotheses.append(recognizer.classify(utterance))
+
+    try:
+        while True:
+            started = time.monotonic()
+            ok, frame = cap.read()
+            if not ok:
+                break
+            scale = MAX_SIDE / max(frame.shape[:2])
+            if scale < 1:
+                frame = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+            _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+            last_jpeg = buf.tobytes()
+            feed(last_jpeg)
+            if realtime:
+                time.sleep(max(0.0, 1.0 / fps - (time.monotonic() - started)))
+        for _ in range(int(TAIL_SECONDS * fps)):
+            if last_jpeg is None:
+                break
+            feed(last_jpeg)
+            if realtime:
+                time.sleep(1.0 / fps)
+    finally:
+        cap.release()
+        perception.close()
+    return hypotheses
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("root", help="folder of <signer>/<sign>/<clip>.mp4")
+    ap.add_argument("--language", default="asl")
+    ap.add_argument("--signers", nargs="*", help="only these signer folders (default: all)")
+    ap.add_argument("--limit", type=int, default=0, help="stop after N clips")
+    ap.add_argument("--fast", action="store_true", help="do not pace to the video's frame rate")
+    args = ap.parse_args()
+
+    registry = LanguageRegistry(CONFIG.languages_path, REPO_ROOT, CONFIG.reject_threshold,
+                                CONFIG.confident_threshold, CONFIG.top_k_alternatives)
+    pack = registry.get(args.language)
+    if pack is None or not pack.ready:
+        raise SystemExit(f"language {args.language!r} has no loadable model")
+
+    videos = sorted(Path(args.root).rglob("*.mp4"))
+    if args.signers:
+        videos = [v for v in videos if v.parent.parent.name in set(args.signers)]
+    if args.limit:
+        videos = videos[: args.limit]
+
+    outcome = Counter()
+    wrong = []
+    for n, video in enumerate(videos, 1):
+        truth = video.parent.name
+        hyps = replay_video(video, pack.recognizer, realtime=not args.fast)
+        committed = [h for h in hyps if h.gloss is not None]
+        if not hyps:
+            outcome["no_utterance"] += 1
+        elif len(hyps) > 1:
+            outcome["split_into_several"] += 1
+        best = max(committed, key=lambda h: h.confidence, default=None)
+        if best is None:
+            if hyps:
+                outcome["all_rejected"] += 1
+        elif best.gloss == truth:
+            outcome["correct"] += 1
+        else:
+            outcome["wrong"] += 1
+            wrong.append(f"{truth} -> {best.gloss} ({best.confidence:.2f})  {video.name}")
+        print(f"[{n}/{len(videos)}] {truth:9s} utterances={len(hyps)} "
+              f"said={best.gloss if best else None}", flush=True)
+
+    total = len(videos)
+    print(f"\n{total} clips through the live path ({args.language})")
+    for key in ("correct", "wrong", "all_rejected", "no_utterance", "split_into_several"):
+        print(f"  {key:20s} {outcome[key]:4d}  ({outcome[key] / max(total, 1):.0%})")
+    for line in wrong[:15]:
+        print("  wrong:", line)
+
+
+if __name__ == "__main__":
+    main()

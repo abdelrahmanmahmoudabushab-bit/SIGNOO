@@ -27,9 +27,15 @@ class SegmentState(str, enum.Enum):
 
 
 def _hand_motion(prev: np.ndarray | None, cur: np.ndarray | None) -> float:
-    """Mean per-landmark displacement between two hand arrays, or 0 if either is absent."""
-    if prev is None or cur is None:
+    """Mean per-landmark displacement between two frames of one hand.
+
+    A hand that is gone contributes nothing, but one that has just *appeared* is by
+    definition not still: reading it as 0 made a flickering hand look like a held pause.
+    """
+    if cur is None:
         return 0.0
+    if prev is None:
+        return float("inf")
     return float(np.mean(np.linalg.norm(cur - prev, axis=-1)))
 
 
@@ -75,7 +81,12 @@ class Segmenter:
                 landmarks.ts_ms if self._hands_absent_since_ms is None else self._hands_absent_since_ms
             )
             if landmarks.ts_ms - self._hands_absent_since_ms >= self.hands_absent_ms:
+                # Dropping the hands is how people end a sign, so it closes the word.
+                # Only frames with hands are buffered, so nothing idle is included, and
+                # a flicker shorter than min_frames is still discarded.
+                utterance = self._close() if len(self._buffer) >= self.min_frames else None
                 self.reset()
+                return utterance
             return None
         self._hands_absent_since_ms = None
 
@@ -99,11 +110,7 @@ class Segmenter:
             and len(self._buffer) >= self.min_frames
         ):
             self.state = SegmentState.BOUNDARY
-            utterance = Utterance(
-                landmarks=list(self._buffer),
-                t_start=self._buffer[0].ts_ms,
-                t_end=self._buffer[-1].ts_ms,
-            )
+            utterance = self._close()
             # Ready to capture the next word immediately; ACTIVE semantics resume.
             self.state = SegmentState.ACTIVE
             self._buffer = []
@@ -111,3 +118,10 @@ class Segmenter:
             return utterance
 
         return None
+
+    def _close(self) -> Utterance:
+        return Utterance(
+            landmarks=list(self._buffer),
+            t_start=self._buffer[0].ts_ms,
+            t_end=self._buffer[-1].ts_ms,
+        )
