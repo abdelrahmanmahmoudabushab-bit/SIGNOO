@@ -168,7 +168,7 @@ def measure_latency_ms(checkpoint_path: Path) -> float:
     sys.path.insert(0, str(settings.ml_dir.parent))
     from ml.model import SignTransformer  # noqa: E402
 
-    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     model = SignTransformer(input_dim=ckpt["input_dim"], num_classes=len(ckpt["labels"]))
     model.load_state_dict(ckpt["model"])
     model.eval()

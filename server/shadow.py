@@ -74,7 +74,7 @@ def _score_candidate(checkpoint_path: str, items: list[ReviewItem]) -> float:
     from core.features import add_velocity
     from ml.model import SignTransformer
 
-    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     labels = {index: sign for sign, index in ckpt["labels"].items()}
     model = SignTransformer(input_dim=ckpt["input_dim"], num_classes=len(labels))
     model.load_state_dict(ckpt["model"])

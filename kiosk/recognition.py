@@ -50,7 +50,10 @@ class Recognizer:
                 "models/README.md (python ml/make_synthetic.py && python ml/train.py ...)"
             )
         try:
-            checkpoint = torch.load(self.model_path, map_location="cpu", weights_only=False)
+            # weights_only: a checkpoint is data (tensors, labels, ints). Refusing to
+            # unpickle arbitrary objects means a tampered model file cannot run code
+            # on the kiosk when the server rolls models out.
+            checkpoint = torch.load(self.model_path, map_location="cpu", weights_only=True)
         except Exception as exc:  # corrupt file, incompatible torch version, etc.
             raise ModelUnavailable(f"checkpoint at {self.model_path} could not be loaded: {exc}") from exc
 
