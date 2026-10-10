@@ -62,11 +62,22 @@ One POST per session, on consent. Landmarks only — never video (`NFR-S2`).
       "landmarks": [[...203-dim float array per frame...]],
       "predicted_gloss": "marhaba",
       "confidence": 0.82,
-      "correction": null
+      "correction": null,
+      "signer_id": "visitor-1a2b3c4d"
     }
   ]
 }
 ```
+
+`signer_id` is an anonymous per-visit id (`visitor-` plus 8 hex characters of the
+session id). Visitors are never identified, so one visit stands in for one signer;
+that is what lets the server keep a signer-independent train/validation/test split
+(DR-4). A returning visitor becomes a new "signer". Rows with no `signer_id`
+(`"unknown"`) are never exported for training.
+
+The kiosk delivers each session as store-and-forward: set `SIGNOO_SERVER_URL` and a
+queued file is deleted only after the server answers 2xx; blank means nothing leaves
+the device.
 
 `correction` is filled in when the visitor picked a different candidate from the
 uncertainty UI (FR-K8/FR-K9) — a **weak label** (FR-L2), never treated as verified

@@ -52,6 +52,23 @@ Open `http://localhost:8000/` in a browser with a camera. `http://localhost:8000
 reports model-load status and telemetry (temperature/throttle are honestly
 `"unavailable"` — this is a dev machine, not a Jetson).
 
+## Languages (one model per sign language)
+
+`core/languages.json` lists every card on the language screen with its `model`,
+`vocab`, `status` (`live` | `pilot` | `coming_soon`) and `real_data` (was the model
+trained on real human signing). `kiosk/languages.py` loads each model that exists at
+startup. A language is **ready** only if its checkpoint and vocabulary load;
+`GET /languages` reports which are ready, and the frontend only lets those cards be
+pressed. Pressing a card puts that visitor on that language's model and vocabulary;
+selecting a language that is not ready returns `language_unavailable` and changes
+nothing, so one language is never quietly served by another's model.
+
+To bring a language live: train a checkpoint (`ml/train.py ... --out models/<name>.pt`),
+add its vocabulary file under `core/`, set `model` and `vocab` in `languages.json`, and
+restart. `SIGNOO_MODEL_PATH` still overrides the Jordanian (`liu`) checkpoint.
+`models/asl_pilot.pt` is the American pilot, trained on PopSign (CC BY 4.0) phone-camera
+clips, a handful of signs only; it is shown as "Pilot" and is not a Jordanian model.
+
 ## Wire protocol (`/ws/session`)
 
 JSON text frames both ways; the full reference lives as a docstring at the top of
