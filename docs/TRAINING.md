@@ -227,7 +227,10 @@ score a distribution the kiosk never sees.
 
 Per signer on test: 68.8%, 81.0%, 90.5%, 93.3%, 93.8%. The weakest sign is `dog` (44%
 on 9 clips; it had the fewest training clips), and the model's own spread warning fires.
-With 5 test signers the figure is noisy; treat it as "works on people it has not seen,
+`ml/compare_splits.py` (a separate, short 25-epoch run, not this checkpoint) scored
+65.2% on the same held-out signers but 88.8% when the test set was drawn at random
+from all clips, an inflation of +23.6 points: that gap is how much a clip-level split
+would have flattered this dataset. With 5 test signers the figure is noisy; treat it as "works on people it has not seen,
 unevenly", not as a benchmark. Mirroring helped because the signers include left-handed
 people; see the caution under Augmentation before enabling it for LIU.
 
