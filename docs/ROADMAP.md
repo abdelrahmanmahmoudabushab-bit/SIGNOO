@@ -45,6 +45,19 @@ recruitment — but it means the gates below are **unmet**, not
   (≥5 signers committed, consent pack approved) and Phase 1's (50 signs × 10 signers
   × 5 reps, ≥85% signer-independent) are both **not yet met** — the single biggest gap
   between this document and reality.
+- **American (ASL) pilot, 2026-10-10.** Each sign language now has its own model slot
+  (`core/languages.json`, `kiosk/languages.py`); pressing a card puts the visitor on
+  that language's model, and a language with no checkpoint is refused. The one extra
+  slot filled is an ASL pilot trained on PopSign (CC BY 4.0): 8 signs, 47 signers,
+  **85.4% top-1 on 5 held-out signers** (worst signer 68.8%). It proves the
+  pipeline on real human signing and says nothing about Jordanian Sign Language.
+  Recipe and caveats: `docs/TRAINING.md`. It stays "Pilot" until Deaf ASL users have
+  tried it on the kiosk camera.
+- **Found while wiring that up:** the live Jordanian model's labels are
+  `sign_000 … sign_019` (synthetic), which match nothing in `core/vocab.json`
+  (`salam`, `marhaba`, …). A recognised LIU sign would render as a placeholder, not a
+  word. The LIU card is only "live" in the demo sense until real recordings produce a
+  checkpoint whose labels are the vocabulary's ids.
 - **Code-vs-doc drift found in the 2026-10-10 read-through.** Each was a place where the
   code did less than the docs/commit messages implied. Status after the same-day fixes:
   1. ~~Learning loop cannot run on kiosk data~~ **Fixed.** `kiosk/data_capture.py` now

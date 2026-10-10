@@ -186,3 +186,52 @@ Check each dataset's licence before use or redistribution.
 4. **Export to the browser** via ONNX, so the app runs the trained model.
 5. **Continuous signing.** Segmentation, then sequence-to-sequence.
 6. **Release the dataset** — with consent — as the first public LIU dataset.
+
+## American pilot (`asl`) — a pipeline proof, not a product
+
+The first model trained on real human signing is **American** Sign Language, built to
+exercise the whole pipeline end to end and to put a real signer-independent number on
+it. It is not Jordanian, and it must not be read as evidence about LIU.
+
+**Data.** PopSign ASL v1.0 (CC BY 4.0, phone-camera clips, 250-sign vocabulary,
+`signdata.cc.gatech.edu`, no login). 8 signs (dog, fish, car, airplane, cat, apple,
+blue, red), up to 3 clips per signer per sign: 865 clips from 47 signers. Hands are
+tracked in under 60% of frames in 80 clips, which is typical for fast signing.
+
+**Rebuild.**
+
+```bash
+# 1. fetch each sign's archives:  .../popsign_v1_0/game/{train,val,test}/<sign>.tar
+# 2. unpack ≤3 clips per signer per sign into data/popsign/raw/<signer>/<sign>/*.mp4
+# 3. landmarks, downscaled and with idle lead-in trimmed, 3 parallel workers
+python ml/extract_landmarks.py data/popsign/raw --out data/popsign/processed \
+       --max-side 480 --trim-idle --workers 3
+python ml/clean.py data/popsign/processed/manifest.json
+python ml/make_split.py data/popsign/processed/manifest.json --val 5 --test 5
+python ml/train.py data/popsign/processed/manifest.json \
+       --split data/popsign/processed/split.json --out models/asl_pilot.pt --mirror-prob 0.5
+python ml/evaluate.py models/asl_pilot.pt data/popsign/processed/manifest.json \
+       --split data/popsign/processed/split.json
+```
+
+The signer IDs come from the clip file names (`4a.<id>-…`). `--trim-idle` matters:
+the kiosk starts an utterance when a hand appears, so training on empty lead-in would
+score a distribution the kiosk never sees.
+
+**Result (one evaluation, on 5 held-out signers, 89 clips, 8 signs; chance is 12.5%).**
+
+| | Validation (5 signers) | Test (5 other signers) |
+|---|---|---|
+| no mirroring | 81.9% | not run |
+| `--mirror-prob 0.5` (chosen on validation only) | 87.6% | **85.4% top-1**, 95.5% top-5 |
+
+Per signer on test: 68.8%, 81.0%, 90.5%, 93.3%, 93.8%. The weakest sign is `dog` (44%
+on 9 clips; it had the fewest training clips), and the model's own spread warning fires.
+With 5 test signers the figure is noisy; treat it as "works on people it has not seen,
+unevenly", not as a benchmark. Mirroring helped because the signers include left-handed
+people; see the caution under Augmentation before enabling it for LIU.
+
+**Limits.** 8 signs. Phone selfie video, not the kiosk camera, so accuracy on the
+kiosk will differ and has not been measured. Not reviewed by Deaf ASL signers. The
+kiosk shows the card as "Pilot" and it stays that way until Deaf ASL users have tried
+it on the kiosk camera. `models/` is gitignored; rebuild from the steps above.
