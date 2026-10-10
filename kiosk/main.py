@@ -63,6 +63,7 @@ from kiosk.data_capture import (
     CapturedItem, SessionCapture, flush_pending_uploads, write_pending_upload,
 )
 from kiosk.dialogue import Dialogue, KnowledgeBase
+from kiosk.fleet import FleetReporter
 from kiosk.output import TTSEngine
 from kiosk.perception import HolisticPerception, PerceptionUnavailable, decode_base64_frame
 from kiosk.playback import ClipLibrary
@@ -74,10 +75,22 @@ import json
 configure_logging()
 logger = logging.getLogger("signoo.kiosk.main")
 
+async def _heartbeat_loop() -> None:
+    reporter = FleetReporter(CONFIG.server_url, CONFIG.kiosk_id, CONFIG.kiosk_token)
+    while True:
+        await asyncio.to_thread(reporter.tick)      # blocking HTTP, kept off the event loop
+        await asyncio.sleep(CONFIG.heartbeat_interval_s)
+
+
 @asynccontextmanager
 async def _lifespan(_: FastAPI):
     _schedule_flush()   # retry anything a previous run could not deliver
-    yield
+    heartbeat = asyncio.create_task(_heartbeat_loop()) if CONFIG.server_url else None
+    try:
+        yield
+    finally:
+        if heartbeat is not None:
+            heartbeat.cancel()
 
 
 app = FastAPI(title="SIGNOO kiosk", lifespan=_lifespan)
@@ -107,7 +120,7 @@ def _schedule_flush() -> None:
     if not CONFIG.server_url:
         return
     task = asyncio.create_task(asyncio.to_thread(
-        flush_pending_uploads, CONFIG.pending_uploads_dir, CONFIG.server_url
+        flush_pending_uploads, CONFIG.pending_uploads_dir, CONFIG.server_url, 5.0, CONFIG.kiosk_token
     ))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)

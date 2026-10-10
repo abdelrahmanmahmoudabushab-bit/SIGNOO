@@ -88,7 +88,8 @@ def write_pending_upload(capture: SessionCapture, pending_dir: Path) -> Path | N
     return target
 
 
-def flush_pending_uploads(pending_dir: Path, server_url: str, timeout_s: float = 5.0) -> int:
+def flush_pending_uploads(pending_dir: Path, server_url: str, timeout_s: float = 5.0,
+                          token: str = "") -> int:
     """Store-and-forward B10 -> B11: POSTs each queued session file to the server's
     `/ingest/sessions` and deletes it only after the server answers 2xx. Anything
     that fails (offline, server down, rejected) stays on disk and is retried on the
@@ -111,7 +112,8 @@ def flush_pending_uploads(pending_dir: Path, server_url: str, timeout_s: float =
             request = urllib.request.Request(
                 server_url.rstrip("/") + "/ingest/sessions",
                 data=path.read_bytes(),
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json",
+                         **({"X-Kiosk-Token": token} if token else {})},
                 method="POST",
             )
             with urllib.request.urlopen(request, timeout=timeout_s) as response:

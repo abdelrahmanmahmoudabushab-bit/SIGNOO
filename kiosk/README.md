@@ -137,6 +137,10 @@ a boundary" rule at the process boundary too, not just between Python modules.
   offline or rejected files stay queued. Left blank, nothing leaves the device.
   Every item carries an anonymous `visitor-<8 hex>` `signer_id` (one visit = one
   signer) so the server's signer-independent split works without identifying anyone.
+  With `SIGNOO_SERVER_URL` set the kiosk also registers with the fleet and sends a
+  heartbeat every `SIGNOO_HEARTBEAT_INTERVAL_S` (30 s) with uptime and, where the board
+  reports it, the hottest thermal-zone temperature (`kiosk/fleet.py`). Set
+  `SIGNOO_KIOSK_TOKEN` to the server's token; a production server refuses requests without it.
 
 ## Frontend
 

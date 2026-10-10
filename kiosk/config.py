@@ -119,6 +119,11 @@ class Config:
     # Base URL of server/ (e.g. http://localhost:8001). Blank = sessions stay queued
     # on disk and nothing leaves the device.
     server_url: str = field(default_factory=lambda: os.environ.get("SIGNOO_SERVER_URL", ""))
+    # Shared secret the server requires on upload/register/heartbeat (X-Kiosk-Token).
+    kiosk_token: str = field(default_factory=lambda: os.environ.get("SIGNOO_KIOSK_TOKEN", ""))
+    heartbeat_interval_s: float = field(
+        default_factory=lambda: _env_float("SIGNOO_HEARTBEAT_INTERVAL_S", 30.0)
+    )
 
     # Perception — every second captured frame, per SYSTEM_DESIGN.md B2 budget.
     perception_stride: int = field(default_factory=lambda: _env_int("SIGNOO_PERCEPTION_STRIDE", 2))

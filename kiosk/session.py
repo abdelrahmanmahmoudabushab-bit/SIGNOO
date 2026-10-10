@@ -16,6 +16,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 class JsonFormatter(logging.Formatter):
@@ -97,13 +98,26 @@ class Session:
         )
 
 
+def read_temperature_c(root: str = "/sys/class/thermal") -> float | None:
+    """Hottest thermal zone in degrees C (Jetson and most Linux boards), or None when
+    the platform exposes none, as on a Windows dev machine."""
+    temps = []
+    for path in Path(root).glob("thermal_zone*/temp"):
+        try:
+            temps.append(int(path.read_text().strip()) / 1000)
+        except (OSError, ValueError):
+            continue
+    return max(temps) if temps else None
+
+
 def telemetry_snapshot() -> dict:
-    """Latency/frame-rate fields are filled in by the caller per-connection; the
-    hardware fields below are honestly "unavailable" on anything that is not a
-    Jetson (SYSTEM_DESIGN.md B9), rather than a plausible-looking fake number.
+    """Latency/frame-rate fields are filled in by the caller per-connection. The
+    temperature is real where the platform reports one; everything else stays
+    honestly "unavailable" (SYSTEM_DESIGN.md B9) rather than a plausible fake number.
     """
+    temperature = read_temperature_c()
     return {
-        "temperature_c": "unavailable",
+        "temperature_c": temperature if temperature is not None else "unavailable",
         "throttled": "unavailable",
         "memory_mb": "unavailable",
     }
