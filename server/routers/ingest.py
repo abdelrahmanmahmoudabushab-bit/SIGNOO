@@ -13,6 +13,7 @@ import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from server.auth import require_kiosk_token
 from server.db import get_db
 from server.models import Kiosk, ReviewItem, SessionUpload
 from server.schemas import SessionUploadIn, SessionUploadOut
@@ -21,7 +22,8 @@ logger = logging.getLogger("server.ingest")
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 
-@router.post("/sessions", response_model=SessionUploadOut, status_code=201)
+@router.post("/sessions", response_model=SessionUploadOut, status_code=201,
+             dependencies=[Depends(require_kiosk_token)])
 def upload_session(payload: SessionUploadIn, db: Session = Depends(get_db)) -> SessionUploadOut:
     if db.get(Kiosk, payload.kiosk_id) is None:
         logger.warning("session upload from unregistered kiosk_id=%s", payload.kiosk_id)

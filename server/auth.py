@@ -6,9 +6,10 @@ authenticated user".
 """
 from __future__ import annotations
 
+import hmac
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -67,6 +68,15 @@ def get_current_user(
     if user is None:
         raise unauthorized
     return CurrentUser(user_id=user.id, email=user.email, role=user.role)
+
+
+def require_kiosk_token(x_kiosk_token: str | None = Header(default=None)) -> None:
+    """Kiosk-facing endpoints (ingest, register, heartbeat) accept only requests that
+    carry the shared kiosk token. With no token configured the check is off, which is
+    only reachable in `dev`; production startup refuses a blank token."""
+    expected = settings.kiosk_token
+    if expected and not hmac.compare_digest(x_kiosk_token or "", expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid kiosk token")
 
 
 def require_role(*allowed: str):

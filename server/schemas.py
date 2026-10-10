@@ -166,7 +166,7 @@ class TokenOut(BaseModel):
 
 class CreateUserIn(BaseModel):
     email: str
-    password: str
+    password: str = Field(min_length=10)
     role: str
 
 

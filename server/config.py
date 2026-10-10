@@ -21,7 +21,16 @@ class Settings:
     database_url: str = os.environ.get(
         "SIGNOO_DATABASE_URL", f"sqlite:///{REPO_ROOT / 'server' / 'signoo_dev.db'}"
     )
+    # "dev" relaxes the startup checks below; anything else is treated as production.
+    environment: str = os.environ.get("SIGNOO_ENV", "production")
     jwt_secret: str = os.environ.get("SIGNOO_JWT_SECRET", "dev-secret-change-me")
+    # Shared secret kiosks send as `X-Kiosk-Token` on ingest/register/heartbeat. Blank
+    # means no check, which production startup refuses (see server/main.py).
+    kiosk_token: str = os.environ.get("SIGNOO_KIOSK_TOKEN", "")
+    # Browser origins allowed to call the API (the console's address). Empty = same-origin only.
+    cors_origins: tuple[str, ...] = tuple(
+        o.strip() for o in os.environ.get("SIGNOO_CORS_ORIGINS", "").split(",") if o.strip()
+    )
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = int(os.environ.get("SIGNOO_JWT_EXPIRE_MINUTES", "480"))
 
@@ -62,6 +71,21 @@ class Settings:
     # it must be scored on, and how far below the champion it may fall.
     shadow_min_items: int = int(os.environ.get("SIGNOO_SHADOW_MIN_ITEMS", "30"))
     shadow_tolerance: float = 0.005
+
+
+DEV_JWT_SECRET = "dev-secret-change-me"
+
+
+def startup_problems(s: Settings) -> list[str]:
+    """Insecure defaults that must never reach a real deployment. Empty in `dev`."""
+    if s.environment == "dev":
+        return []
+    problems = []
+    if s.jwt_secret == DEV_JWT_SECRET or len(s.jwt_secret) < 32:
+        problems.append("SIGNOO_JWT_SECRET must be set to a random value of at least 32 characters")
+    if not s.kiosk_token:
+        problems.append("SIGNOO_KIOSK_TOKEN must be set so only your kiosks can upload and register")
+    return problems
 
 
 settings = Settings()

@@ -125,6 +125,24 @@ With no competing server process, the full 28-test suite (including
 minutes total. If running in CI, don't share a runner with another live memory-
 hungry process; `test_gate.py` can run in its own job if that's easier to guarantee.
 
+## Production settings
+
+The server refuses to start unless these are set (or `SIGNOO_ENV=dev`, for local work
+only; `dev` is also what the tests use). Anything not `dev` is treated as production.
+
+| Variable | Purpose |
+|---|---|
+| `SIGNOO_JWT_SECRET` | Signs console logins. At least 32 random characters; the built-in dev value is refused. |
+| `SIGNOO_KIOSK_TOKEN` | Shared secret kiosks send as `X-Kiosk-Token` on upload, register and heartbeat. Blank is refused. |
+| `SIGNOO_DATABASE_URL` | Postgres in production; SQLite only for local dev. |
+| `SIGNOO_CORS_ORIGINS` | Comma-separated console origins allowed to call the API. Empty = same-origin only. |
+| `SIGNOO_AUTO_TRAIN`, `_HOURS`, `_POLL_MIN` | The 3-day candidate cycle (on by default, 72 h). |
+| `SIGNOO_SHADOW_MIN_ITEMS` | Reviewed live items a candidate needs before its shadow run can be judged (30). |
+
+Generate secrets with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+Passwords for new users must be at least 10 characters. Put the API behind TLS (a
+reverse proxy) and rate-limit `/auth/login` there; neither is done in this process.
+
 ## Known gaps (documented, not silently skipped)
 
 - **B12 cadence (built 2026-10-10)**: `server/scheduler.py` trains a *candidate* every
@@ -147,10 +165,10 @@ hungry process; `test_gate.py` can run in its own job if that's easier to guaran
   (`server/shadow.py`), against what the champion actually said on the same items,
   and answers 409 until `SIGNOO_SHADOW_MIN_ITEMS` (default 30) exist. What is still
   not built is fleet-wide monitoring of live metrics during a staged rollout.
-- **Kiosk auth**: `/ingest/sessions` and `/fleet/kiosks/*` have no
-  kiosk-identity check beyond a soft `kiosk_id` lookup — `SYSTEM_DESIGN.md` §5
-  specifies mTLS at the transport layer for this, which this dev server does not
-  terminate itself.
+- **Kiosk auth**: `/ingest/sessions` and `/fleet/kiosks/{register,heartbeat}` require
+  the shared `X-Kiosk-Token`. That proves a request came from something holding the
+  secret, not *which* kiosk; `SYSTEM_DESIGN.md` §5's per-kiosk mTLS is still the
+  stronger design and is not built (this process does not terminate TLS).
 - **KB sharing with kiosk/**: every KB write also rewrites
   `kiosk/data/knowledge_base.json` in full (`server/kb.py::sync_kiosk_kb_file`),
   so kiosk B7 can read it directly — this is the dev-simulation shortcut named

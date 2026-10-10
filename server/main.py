@@ -11,8 +11,9 @@ import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from server.config import settings
+from server.config import settings, startup_problems
 from server.db import init_db
 from server.routers import auth, fleet, ingest, kb, registry, review, training
 from server.scheduler import scheduler_loop
@@ -27,6 +28,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    problems = startup_problems(settings)
+    if problems:
+        # A forged admin token or an open ingest endpoint is worse than a server that
+        # will not start, so insecure defaults stop it here. SIGNOO_ENV=dev bypasses.
+        raise RuntimeError("refusing to start: " + "; ".join(problems))
     # Dev-simulation convenience only; a real deployment migrates with Alembic
     # (server/alembic) instead of create_all — see server/README.md.
     init_db()
@@ -45,6 +51,12 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+if settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware, allow_origins=list(settings.cors_origins),
+        allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Authorization", "Content-Type"],
+    )
 
 app.include_router(auth.router)
 app.include_router(ingest.router)

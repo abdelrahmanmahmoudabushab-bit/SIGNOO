@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from server.auth import CurrentUser, require_role
+from server.auth import CurrentUser, require_kiosk_token, require_role
 from server.db import get_db
 from server.models import Kiosk, ModelVersion, Rollout
 from server.schemas import (
@@ -40,7 +40,8 @@ def _to_out(kiosk: Kiosk) -> KioskOut:
     )
 
 
-@router.post("/kiosks/register", response_model=KioskOut, status_code=201)
+@router.post("/kiosks/register", response_model=KioskOut, status_code=201,
+             dependencies=[Depends(require_kiosk_token)])
 def register(payload: KioskRegisterIn, db: Session = Depends(get_db)) -> KioskOut:
     existing = db.get(Kiosk, payload.kiosk_id)
     if existing is not None:
@@ -55,7 +56,8 @@ def register(payload: KioskRegisterIn, db: Session = Depends(get_db)) -> KioskOu
     return _to_out(kiosk)
 
 
-@router.post("/kiosks/{kiosk_id}/heartbeat", response_model=KioskOut)
+@router.post("/kiosks/{kiosk_id}/heartbeat", response_model=KioskOut,
+             dependencies=[Depends(require_kiosk_token)])
 def heartbeat(kiosk_id: str, payload: KioskHeartbeatIn, db: Session = Depends(get_db)) -> KioskOut:
     kiosk = db.get(Kiosk, kiosk_id)
     if kiosk is None:
