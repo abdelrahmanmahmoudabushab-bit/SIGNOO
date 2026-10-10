@@ -62,6 +62,9 @@ def complete_shadow(
     candidate = db.get(ModelVersion, version)
     if candidate is None:
         raise HTTPException(status_code=404, detail="model version not found")
+    if candidate.status in ("promoted", "rolled_back"):
+        # Re-judging a live or retired model would silently demote it to "shadow"/"rejected".
+        raise HTTPException(status_code=409, detail=f"version is '{candidate.status}'; nothing to judge")
 
     champion_stmt = (
         select(ModelVersion)

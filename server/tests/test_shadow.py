@@ -114,6 +114,19 @@ def test_worse_candidate_is_rejected_and_the_champion_stays(client, make_user, d
     assert any(m["version"] == "v-champion" and m["status"] == "promoted" for m in listing)
 
 
+def test_a_promoted_model_cannot_be_re_judged_into_a_demotion(client, make_user, db_session, tmp_path):
+    live = _version(db_session, "v-live", status="promoted", checkpoint=_checkpoint(tmp_path / "a.pt", "a"))
+    live.promoted_at = CREATED
+    _items(db_session, 30, truth="b", champion_said="b")        # would fail it if it were judged
+    headers = {"Authorization": f"Bearer {make_user('eng@signoo.dev', 'engineer')}"}
+
+    resp = client.post("/registry/v-live/shadow-complete", headers=headers)
+
+    assert resp.status_code == 409
+    listing = client.get("/registry?language=liu", headers=headers).json()
+    assert next(m for m in listing if m["version"] == "v-live")["status"] == "promoted"
+
+
 def test_items_reviewed_before_the_candidate_existed_do_not_count(client, make_user, db_session, tmp_path):
     _version(db_session, "v-new", status="candidate", checkpoint=_checkpoint(tmp_path / "a.pt", "a"))
     _items(db_session, 30, truth="a", champion_said="a", reviewed_at=REVIEWED_BEFORE)
