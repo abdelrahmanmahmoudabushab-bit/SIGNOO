@@ -43,7 +43,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
   if (!res.ok) {
-    throw new ApiError(`${path} -> ${res.status}`, res.status);
+    // Prefer the server's own reason (FastAPI's `detail`) so a refusal says why.
+    let detail = "";
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // body wasn't JSON; fall through to the status line
+    }
+    throw new ApiError(detail || `${path} -> ${res.status}`, res.status);
   }
   return (await res.json()) as T;
 }

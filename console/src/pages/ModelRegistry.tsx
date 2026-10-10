@@ -12,6 +12,7 @@ export function ModelRegistry() {
   const [kiosks, setKiosks] = useState<KioskSummary[]>([]);
   const [source, setSource] = useState<"server" | "mock" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -26,32 +27,28 @@ export function ModelRegistry() {
     };
   }, []);
 
-  async function onPromote(version: string) {
+  // Every action reports what the server said. A refusal (the promotion gate's 409, a 403)
+  // is shown as an error and the row is left unchanged; it is never displayed as a success.
+  async function act(version: string, run: () => Promise<void>) {
     setBusy(version);
-    const { data } = await promoteModel(version);
-    setEntries((prev) => prev?.map((e) => (e.version === version ? { ...e, status: data.status as ModelRegistryEntry["status"] } : e)) ?? null);
-    setBusy(null);
+    setError(null);
+    try {
+      await run();
+    } catch (e) {
+      setError(`${version}: ${e instanceof Error ? e.message : "action failed"}`);
+    } finally {
+      setBusy(null);
+    }
   }
 
-  async function onCompleteShadow(version: string) {
-    setBusy(version);
-    const { data } = await completeShadowRun(version);
-    setEntries((prev) => prev?.map((e) => (e.version === version ? { ...e, status: data.status as ModelRegistryEntry["status"] } : e)) ?? null);
-    setBusy(null);
+  function setStatus(version: string, status: string) {
+    setEntries((prev) => prev?.map((e) => (e.version === version ? { ...e, status: status as ModelRegistryEntry["status"] } : e)) ?? null);
   }
 
-  async function onRollback(version: string) {
-    setBusy(version);
-    const { data } = await rollbackModel(version);
-    setEntries((prev) => prev?.map((e) => (e.version === version ? { ...e, status: data.status as ModelRegistryEntry["status"] } : e)) ?? null);
-    setBusy(null);
-  }
-
-  async function onPin(version: string, kioskId: string) {
-    setBusy(version);
-    await pinModelToKiosk(version, kioskId);
-    setBusy(null);
-  }
+  const onPromote = (version: string) => act(version, async () => setStatus(version, (await promoteModel(version)).data.status));
+  const onCompleteShadow = (version: string) => act(version, async () => setStatus(version, (await completeShadowRun(version)).data.status));
+  const onRollback = (version: string) => act(version, async () => setStatus(version, (await rollbackModel(version)).data.status));
+  const onPin = (version: string, kioskId: string) => act(version, async () => void (await pinModelToKiosk(version, kioskId)));
 
   const canPromote = can(user?.role, "registry:promote");
 
@@ -61,6 +58,7 @@ export function ModelRegistry() {
         <h1>Model registry (FR-W6)</h1>
         <SourceTag source={source} />
       </header>
+      {error && <p role="alert" className="gate-fail">{error}</p>}
       {!entries && <p>Loading…</p>}
       {entries && (
         <table className="data-table">

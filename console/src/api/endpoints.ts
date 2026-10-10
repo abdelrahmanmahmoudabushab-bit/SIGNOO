@@ -3,7 +3,7 @@
 // any failure, tagging the result with `source` so views can disclose which one answered.
 // This is the ONLY module (besides client.ts) that should change when server/'s real routes
 // land — no view component talks to fetch() directly.
-import { apiFetch, type Sourced } from "./client";
+import { ApiError, apiFetch, type Sourced } from "./client";
 import * as mock from "./mock";
 import type {
   AlertEntry,
@@ -29,7 +29,13 @@ async function withMockFallback<T>(path: string, init: RequestInit | undefined, 
   try {
     const data = await apiFetch<T>(path, init);
     return { data, source: "server" };
-  } catch {
+  } catch (err) {
+    // A real server that answered and refused a write (the promotion gate's 409, a 403 for
+    // a role) must surface as a failure. Falling back to the mock's success here would tell
+    // an operator a model was promoted when the server said no. Reads, and any failure to
+    // reach a server at all, still fall back to mock data.
+    const isWrite = (init?.method ?? "GET").toUpperCase() !== "GET";
+    if (isWrite && err instanceof ApiError && err.status >= 400) throw err;
     return { data: fallback(), source: "mock" };
   }
 }
