@@ -19,6 +19,7 @@ from server.db import get_db
 from server.gate import evaluate_gate
 from server.models import ModelVersion
 from server.schemas import ModelVersionOut
+from server.shadow import evaluate_shadow
 
 router = APIRouter(prefix="/registry", tags=["registry"])
 READ_ROLES = ("operator", "reviewer", "engineer", "admin")
@@ -53,9 +54,10 @@ def complete_shadow(
     version: str, db: Session = Depends(get_db),
     _: CurrentUser = Depends(require_role(*GATE_ROLES)),
 ) -> ModelVersionOut:
-    """FR-L7: recomputes the gate with `shadow_run_complete=True`. A live-metric
-    degradation check during the shadow window itself is fleet-scale (SYSTEM_DESIGN
-    §6) and out of scope here — see server/README.md's documented gaps.
+    """FR-L7: scores the candidate on reviewed live items newer than itself
+    (server/shadow.py) and recomputes the gate from that measurement. 409 until
+    enough such items exist. Fleet-wide live-metric monitoring during a staged
+    rollout is separate and not built; this is the pre-promotion check.
     """
     candidate = db.get(ModelVersion, version)
     if candidate is None:
@@ -83,12 +85,26 @@ def complete_shadow(
             detail=f"version '{version}' has no recorded latency measurement; cannot evaluate the gate",
         )
 
+    try:
+        shadow = evaluate_shadow(db, candidate, champion)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not shadow.enough_data:
+        raise HTTPException(status_code=409, detail=shadow.reason)
+
     verdict = evaluate_gate(
         candidate.metrics, champion.metrics if champion else None,
         candidate_latency_ms=candidate_latency_ms,
         latency_budget_ms=settings.latency_budget_ms,
-        shadow_run_complete=True,
+        shadow_run_complete=shadow.ok,
     )
+    verdict.details["shadow_run_complete"] = shadow.reason
+    verdict.measurements.update({
+        "shadow_items": float(shadow.items),
+        "shadow_candidate_accuracy": shadow.candidate_accuracy,
+        **({"shadow_champion_accuracy": shadow.champion_accuracy}
+           if shadow.champion_accuracy is not None else {}),
+    })
     candidate.gate = verdict.as_dict()
     candidate.shadow_started_at = candidate.shadow_started_at or datetime.now(timezone.utc)
     candidate.status = "shadow" if verdict.passed else "rejected"

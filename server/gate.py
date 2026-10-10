@@ -136,11 +136,10 @@ def evaluate_gate(
     # 4. No class falls to zero recall.
     cand_per_sign = candidate.get("per_sign")
     if not cand_per_sign:
-        # Mirrors criterion 5 below: a missing measurement is a data-quality gap,
-        # not evidence of "no class at zero recall" — flag it rather than silently
-        # reporting a pass no one actually verified.
-        criteria["no_zero_recall_class"] = True
-        details["no_zero_recall_class"] = "not measured (candidate has no per_sign metrics) — treated as pass"
+        # ml/evaluate.py always reports per_sign, so its absence means the evaluation
+        # did not run properly. A check nobody could perform must not read as a pass.
+        criteria["no_zero_recall_class"] = False
+        details["no_zero_recall_class"] = "candidate has no per_sign metrics, so zero-recall classes cannot be ruled out"
     else:
         zero_recall = [sign for sign, acc in cand_per_sign.items() if acc == 0.0]
         criteria["no_zero_recall_class"] = not zero_recall

@@ -45,5 +45,23 @@ class Settings:
     # criterion (DR-6 #6) checks candidates against.
     latency_budget_ms: float = 300.0
 
+    # The validation/test signers are chosen once per language and then frozen here, so
+    # the benchmark does not drift as new signers arrive (DR-5, DR-7a).
+    frozen_split_path: Path = field(
+        default_factory=lambda: REPO_ROOT / "server" / "runs" / "frozen_split.json"
+    )
+
+    # FR-L5: candidate training runs automatically on this cadence. Promotion never
+    # does; it always goes through the gate and an engineer (server/scheduler.py).
+    auto_train_enabled: bool = os.environ.get("SIGNOO_AUTO_TRAIN", "1") == "1"
+    auto_train_interval_hours: float = float(os.environ.get("SIGNOO_AUTO_TRAIN_HOURS", "72"))
+    auto_train_poll_minutes: float = float(os.environ.get("SIGNOO_AUTO_TRAIN_POLL_MIN", "60"))
+    auto_train_languages: tuple[str, ...] = ("liu",)
+
+    # FR-L7 shadow evaluation: how many reviewed live items, newer than the candidate,
+    # it must be scored on, and how far below the champion it may fall.
+    shadow_min_items: int = int(os.environ.get("SIGNOO_SHADOW_MIN_ITEMS", "30"))
+    shadow_tolerance: float = 0.005
+
 
 settings = Settings()

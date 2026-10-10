@@ -128,6 +128,18 @@ def test_gate_rejects_on_latency_alone():
     assert verdict.criteria["latency_within_budget"] is False
 
 
+def test_gate_fails_when_per_sign_metrics_are_missing():
+    """A check nobody could perform must not read as a pass."""
+    with_signs = {"top1": 0.9, "top5": 0.99, "per_signer": {"s1": 0.9}, "per_sign": {"a": 0.9}}
+    without = {"top1": 0.9, "top5": 0.99, "per_signer": {"s1": 0.9}}
+    verdict = evaluate_gate(
+        candidate=without, champion=with_signs,
+        candidate_latency_ms=50.0, latency_budget_ms=300.0, shadow_run_complete=True,
+    )
+    assert verdict.criteria["no_zero_recall_class"] is False
+    assert verdict.passed is False
+
+
 def test_gate_rejects_without_completed_shadow_run():
     metrics = {"top1": 0.9, "top5": 0.99, "per_signer": {"s1": 0.9}, "per_sign": {"a": 0.9}}
     verdict = evaluate_gate(

@@ -127,21 +127,26 @@ hungry process; `test_gate.py` can run in its own job if that's easier to guaran
 
 ## Known gaps (documented, not silently skipped)
 
-- **B12 cadence**: `POST /training/trigger` is a manual job, not FR-L5's live
-  3-day cron — there is no reviewer throughput yet to feed a real schedule. The
-  export step (`server/training.py::export_validated_manifest`) refuses to run
-  below 3 distinct validated signers (DR-4's signer-independent split needs at
-  least one signer per split) and raises a typed `InsufficientDataError` (422),
-  which is the expected steady state right after launch.
+- **B12 cadence (built 2026-10-10)**: `server/scheduler.py` trains a *candidate* every
+  `SIGNOO_AUTO_TRAIN_HOURS` (default 72), polling every `SIGNOO_AUTO_TRAIN_POLL_MIN`
+  (60); it never promotes. It will not run until the benchmark signers have been
+  frozen by a deliberate first `POST /training/trigger`
+  (`server/runs/frozen_split.json`; later signers go to train). Set
+  `SIGNOO_AUTO_TRAIN=0` to disable. The export step
+  (`server/training.py::export_validated_manifest`) still refuses to run below 3
+  distinct validated signers and raises `InsufficientDataError` (422), the expected
+  steady state right after launch. Rows with `signer_id="unknown"` are never exported.
+  The benchmark is frozen, not yet human-verified (DR-7a).
 - **False-accept rate (DR-6 criterion 5)**: `ml/evaluate.py` has no non-signing
   negative set to measure this against yet. `server/gate.py` treats a missing
   measurement as "not measured, does not block" rather than fabricating a
   number — see the comment in `evaluate_gate()`. Building that negative set is
   ml/ follow-up work, not something this server layer can manufacture.
-- **Live shadow-run monitoring**: `POST /registry/{version}/shadow-complete`
-  recomputes the gate with `shadow_run_complete=True` but does not itself watch
-  live traffic for degradation during the window (FR-L7/DR-6 #7) — there is no
-  live fleet traffic to watch yet. The flag is operator-asserted for now.
+- **Shadow evaluation (built 2026-10-10)**: `POST /registry/{version}/shadow-complete`
+  scores the candidate on reviewed live items validated *after* it was created
+  (`server/shadow.py`), against what the champion actually said on the same items,
+  and answers 409 until `SIGNOO_SHADOW_MIN_ITEMS` (default 30) exist. What is still
+  not built is fleet-wide monitoring of live metrics during a staged rollout.
 - **Kiosk auth**: `/ingest/sessions` and `/fleet/kiosks/*` have no
   kiosk-identity check beyond a soft `kiosk_id` lookup — `SYSTEM_DESIGN.md` §5
   specifies mTLS at the transport layer for this, which this dev server does not

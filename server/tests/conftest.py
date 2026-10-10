@@ -2,8 +2,13 @@
 to it via a `get_db` override (never the dev-machine signoo_dev.db)."""
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
+
+# Must be set before server.config is first imported: tests drive the scheduler
+# directly and must never have a background training loop running behind them.
+os.environ["SIGNOO_AUTO_TRAIN"] = "0"
 
 import pytest
 from fastapi.testclient import TestClient
