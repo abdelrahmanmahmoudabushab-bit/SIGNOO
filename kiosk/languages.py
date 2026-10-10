@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from kiosk.assembly import Vocabulary
 from kiosk.recognition import ModelUnavailable, Recognizer
+from kiosk.segmentation import Segmenter
 
 logger = logging.getLogger("signoo.kiosk.languages")
 
@@ -31,6 +32,13 @@ class LanguagePack:
     vocab: Vocabulary | None = None
     recognizer: Recognizer | None = None
     error: str | None = None
+    # Word-boundary tuning for this language; any key left out uses the kiosk default.
+    segmentation: dict = field(default_factory=dict)
+
+    def make_segmenter(self, defaults: dict) -> Segmenter:
+        """This language's own B3: signing tempo and pauses differ between languages, so
+        boundary timing is part of its engine, chosen together with its model."""
+        return Segmenter(**{**defaults, **self.segmentation})
 
     @property
     def ready(self) -> bool:
@@ -56,6 +64,7 @@ class LanguageRegistry:
             pack = LanguagePack(
                 code=entry["code"], status=entry["status"], real_data=bool(entry.get("real_data")),
                 vocab_path=Path(entry["vocab"]) if entry.get("vocab") else None,
+                segmentation=dict(entry.get("segmentation", {})),
             )
             if entry.get("model") and entry.get("vocab"):
                 model_path = overrides.get(pack.code) or repo_root / entry["model"]

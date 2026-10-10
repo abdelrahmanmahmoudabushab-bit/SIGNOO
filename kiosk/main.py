@@ -105,6 +105,12 @@ _tts = TTSEngine(enabled=CONFIG.tts_enabled)
 # checkpoint leaves that one language unavailable (SYSTEM_DESIGN.md §6) rather than
 # stopping the process: the frontend still needs to serve a clear out-of-service state.
 DEFAULT_LANGUAGE = "liu"
+SEGMENTATION_DEFAULTS = {
+    "pause_ms": CONFIG.segmentation_pause_ms,
+    "motion_threshold": CONFIG.segmentation_motion_threshold,
+    "hands_absent_ms": CONFIG.segmentation_hands_absent_ms,
+    "min_frames": CONFIG.min_utterance_frames,
+}
 registry = LanguageRegistry(
     CONFIG.languages_path, REPO_ROOT,
     CONFIG.reject_threshold, CONFIG.confident_threshold, CONFIG.top_k_alternatives,
@@ -154,15 +160,10 @@ class KioskConnection:
         self.session = Session(kiosk_id=CONFIG.kiosk_id)
         self.pack = registry.get(DEFAULT_LANGUAGE)
         self.assembler = Assembler(self._vocab_for(self.pack))
+        self.segmenter = self._segmenter_for(self.pack)
         self.dialogue = Dialogue(
             _kb, CONFIG.kb_similarity_floor, CONFIG.claude_model, CONFIG.claude_timeout_s,
             CONFIG.dialogue_cloud_enabled, _vocab, _clip_library._entries,
-        )
-        self.segmenter = Segmenter(
-            pause_ms=CONFIG.segmentation_pause_ms,
-            motion_threshold=CONFIG.segmentation_motion_threshold,
-            hands_absent_ms=CONFIG.segmentation_hands_absent_ms,
-            min_frames=CONFIG.min_utterance_frames,
         )
         self.capture = SessionCapture(
             session_id=self.session.correlation_id,
@@ -177,6 +178,11 @@ class KioskConnection:
     @staticmethod
     def _vocab_for(pack) -> Vocabulary:
         return pack.vocab if pack is not None and pack.vocab is not None else _vocab
+
+    @staticmethod
+    def _segmenter_for(pack) -> Segmenter:
+        """The chosen language's own word-boundary tuning over the kiosk defaults."""
+        return pack.make_segmenter(SEGMENTATION_DEFAULTS) if pack is not None else Segmenter(**SEGMENTATION_DEFAULTS)
 
     async def send(self, message: dict) -> None:
         await self.ws.send_text(json.dumps(message, ensure_ascii=False))
@@ -206,8 +212,10 @@ class KioskConnection:
                 await self.send({"type": "error", "code": "language_unavailable",
                                  "message": f"{code!r} has no trained model yet"})
                 return
+            # The whole engine switches together: model, vocabulary and boundary tuning.
             self.pack = pack
             self.assembler = Assembler(self._vocab_for(pack))
+            self.segmenter = self._segmenter_for(pack)
             self.session.language = code
             self.capture.language = code
             self.session.transition(SessionState.LANGUAGE, language=self.session.language)
@@ -432,7 +440,7 @@ class KioskConnection:
             self.perception = None
         self.pack = registry.get(DEFAULT_LANGUAGE)
         self.assembler = Assembler(self._vocab_for(self.pack))
-        self.segmenter.reset()
+        self.segmenter = self._segmenter_for(self.pack)
         self.pending_candidates = None
         old_kiosk_id = self.session.kiosk_id
         self.session = Session(kiosk_id=old_kiosk_id)

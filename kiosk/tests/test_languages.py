@@ -33,7 +33,8 @@ def _checkpoint(path: Path, labels: list[str], favoured: int) -> None:
                 "input_dim": FRAME_DIM * 2}, path)
 
 
-def _world(tmp_path: Path, asl_confident: float | None = None) -> LanguageRegistry:
+def _world(tmp_path: Path, asl_confident: float | None = None,
+           asl_segmentation: dict | None = None) -> LanguageRegistry:
     (tmp_path / "models").mkdir()
     _checkpoint(tmp_path / "models" / "liu.pt", ["marhaba", "shukran"], favoured=0)
     _checkpoint(tmp_path / "models" / "asl.pt", ["dog", "cat"], favoured=0)
@@ -47,7 +48,8 @@ def _world(tmp_path: Path, asl_confident: float | None = None) -> LanguageRegist
     config.write_text(json.dumps([
         {"code": "liu", "model": "models/liu.pt", "vocab": "liu_vocab.json", "status": "live", "real_data": False},
         {"code": "asl", "model": "models/asl.pt", "vocab": "asl_vocab.json", "status": "pilot", "real_data": True,
-         **({"confident_threshold": asl_confident} if asl_confident else {})},
+         **({"confident_threshold": asl_confident} if asl_confident else {}),
+         **({"segmentation": asl_segmentation} if asl_segmentation else {})},
         {"code": "esl", "model": None, "vocab": None, "status": "coming_soon", "real_data": False},
         {"code": "ssl", "model": "models/missing.pt", "vocab": "liu_vocab.json", "status": "coming_soon", "real_data": False},
     ]), encoding="utf-8")
@@ -80,6 +82,26 @@ def test_below_a_languages_bar_the_word_becomes_candidates_not_a_commit(tmp_path
 
     assert conn.ws.sent[-1]["status"] == "candidates"
     assert conn.assembler.gloss_seq == []                                   # nothing was committed
+
+
+def test_a_language_brings_its_own_segmentation_tuning(tmp_path, monkeypatch):
+    """Signing tempo differs between languages, so word-boundary timing is part of a
+    language's engine, selected together with its model."""
+    import kiosk.main as kiosk_main
+
+    registry = _world(tmp_path, asl_segmentation={"pause_ms": 321, "min_frames": 9})
+    monkeypatch.setattr(kiosk_main, "registry", registry)
+    conn = kiosk_main.KioskConnection(_FakeWS())
+    default_pause = conn.segmenter.pause_ms
+    assert default_pause != 321
+
+    asyncio.run(conn.handle({"type": "language", "lang": "asl"}))
+    assert (conn.segmenter.pause_ms, conn.segmenter.min_frames) == (321, 9)
+    # Untouched settings fall back to the kiosk defaults rather than disappearing.
+    assert conn.segmenter.motion_threshold == kiosk_main.CONFIG.segmentation_motion_threshold
+
+    asyncio.run(conn._end_session())                       # the next visitor starts on the default engine
+    assert conn.segmenter.pause_ms == default_pause
 
 
 def test_only_languages_with_a_loadable_model_are_ready(tmp_path):
