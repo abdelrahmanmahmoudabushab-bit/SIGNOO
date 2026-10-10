@@ -162,7 +162,12 @@ function send(message) {
 
 function handleMessage(msg) {
   switch (msg.type) {
-    case 'state': break;   // server-side session state; UI already drives the flow
+    case 'state':
+      if (awaitingLanguage && msg.session_state === 'language') {
+        awaitingLanguage = false;
+        showView('consent');
+      }
+      break;
     case 'landmarks':
       if (el.overlay.dataset.skeletonOn === '1') drawLandmarks(el.overlay, el.video, msg);
       break;
@@ -184,7 +189,24 @@ function handleMessage(msg) {
     case 'playback': onPlayback(msg.words); break;
     case 'idle_warning': onIdleWarning(msg.seconds_left); break;
     case 'session_reset': onSessionReset(); break;
-    case 'error': toast(msg.message || msg.code); break;
+    case 'error':
+      if (msg.code === 'language_unavailable') {
+        // Stay on the language screen and grey the card out, so the visitor is not
+        // walked through consent for a language the kiosk cannot read.
+        awaitingLanguage = false;
+        const card = document.querySelector(`.lang-card[data-lang="${selectedLang}"]`);
+        if (card) {
+          card.disabled = true;
+          const badge = card.querySelector('.lang-soon');
+          if (badge) badge.textContent = 'قريبًا · Coming soon';
+        }
+        selectedLang = null;
+        showView('language');
+        toast('هذه اللغة غير متاحة بعد · This language is not available yet');
+        break;
+      }
+      toast(msg.message || msg.code);
+      break;
     default: break;
   }
 }
@@ -456,6 +478,7 @@ function enterLanguage() {
 
 // ── flow wiring ──────────────────────────────────────────────────────────────
 let selectedLang = null;
+let awaitingLanguage = false;
 let thankyouTimer = null;
 const THANKYOU_DISPLAY_MS = 5000;
 
@@ -468,8 +491,11 @@ function wireEvents() {
       applyLanguageLocale(selectedLang);
       // The chosen language's own vocabulary labels its candidate buttons and captions.
       loadVocab(languageInfo.get(selectedLang)?.vocab_url || '/core/vocab.json');
+      // Consent is shown only once the backend confirms it switched to this language's
+      // own engine (handleMessage). Moving on straight away let a refused language
+      // carry on silently on the default one.
+      awaitingLanguage = true;
       send({ type: 'language', lang: selectedLang });
-      showView('consent');
     };
   }
 
