@@ -1,21 +1,35 @@
-"""B3 Segmentation: pause-based utterance boundary detection (SYSTEM_DESIGN.md B3).
+"""B3 Segmentation: utterance boundary detection (SYSTEM_DESIGN.md B3).
 
-    IDLE ──hands enter frame──> ACTIVE ──motion below threshold for N ms──> BOUNDARY
-      ^                            |                                            |
-      +────hands leave frame───────+────────────────────────────────────────────+
+    IDLE ──hands enter frame──> ACTIVE ──hands hold still for N ms──> emit word
+      ^                           |  ──hands leave the frame for M ms──> emit word
+      +─────────reset────────────+
 
-Honest about the limit (as the design doc is): this reads deliberate, paused signing
-well and fluent connected signing poorly. Thresholds are config (`kiosk/config.py`),
-never hardcoded, because signing tempo differs between languages and people.
+A word ends either when the hands hold still (a deliberate pause) or when they leave
+the frame (how people actually finish a sign). After a word is emitted, the next one
+starts only once the hands move again, so a hand resting in view is not read as an
+endless series of words.
+
+Honest about the limit (as the design doc is): this reads deliberate, word-by-word
+signing and fluent connected signing poorly. Thresholds are config
+(`kiosk/config.py`), never hardcoded, because signing tempo differs between languages
+and people.
+
+Two properties come from measuring this on real recordings (`kiosk/replay.py`):
+hand tracking is noisy, and MediaPipe's left/right labels flip between frames. So
+motion is matched by position rather than by label, and smoothed over a few frames so
+a single noisy frame cannot restart the pause timer.
 """
 from __future__ import annotations
 
 import enum
+from collections import deque
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from core.contracts import Landmarks, Utterance
+
+SMOOTHING_FRAMES = 3
 
 
 class SegmentState(str, enum.Enum):
@@ -26,23 +40,37 @@ class SegmentState(str, enum.Enum):
                                 # ACTIVE or IDLE on the very next frame.
 
 
-def _hand_motion(prev: np.ndarray | None, cur: np.ndarray | None) -> float:
-    """Mean per-landmark displacement between two frames of one hand.
+def _present_hands(landmarks: Landmarks) -> list[np.ndarray]:
+    return [h for h in (landmarks.left, landmarks.right) if h is not None]
 
-    A hand that is gone contributes nothing, but one that has just *appeared* is by
-    definition not still: reading it as 0 made a flickering hand look like a held pause.
+
+def _hands_motion(prev: list[np.ndarray], cur: list[np.ndarray]) -> float:
+    """How far the hands moved between two frames, ignoring left/right labels.
+
+    Each current hand is compared with the nearest hand of the previous frame, so a
+    label flip (the same hand reported as left, then right) reads as no motion. A
+    frame with no hands contributes nothing, but a hand appearing from nothing is by
+    definition not still.
     """
-    if cur is None:
+    if not cur:
         return 0.0
-    if prev is None:
+    if not prev:
         return float("inf")
-    return float(np.mean(np.linalg.norm(cur - prev, axis=-1)))
+    return max(
+        min(float(np.mean(np.linalg.norm(c - p, axis=-1))) for p in prev)
+        for c in cur
+    )
+
+
+def _median(values) -> float:
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
 
 
 @dataclass
 class Segmenter:
     """Feed it one `Landmarks` per processed frame; get an `Utterance` back at each
-    pause boundary, or `None` while still accumulating.
+    boundary, or `None` while still accumulating.
     """
 
     pause_ms: int
@@ -52,31 +80,36 @@ class Segmenter:
 
     state: SegmentState = SegmentState.IDLE
     _buffer: list[Landmarks] = field(default_factory=list)
-    _prev_left: np.ndarray | None = None
-    _prev_right: np.ndarray | None = None
+    _prev_hands: list = field(default_factory=list)
+    _recent_motion: deque = field(default_factory=lambda: deque(maxlen=SMOOTHING_FRAMES))
+    _armed: bool = True            # False right after a word, until the hands move again
     _still_since_ms: int | None = None
     _hands_absent_since_ms: int | None = None
 
     def reset(self) -> None:
         self.state = SegmentState.IDLE
         self._buffer.clear()
-        self._prev_left = self._prev_right = None
+        self._prev_hands = []
+        self._recent_motion.clear()
+        self._armed = True
         self._still_since_ms = self._hands_absent_since_ms = None
 
     def feed(self, landmarks: Landmarks) -> Utterance | None:
-        hands_present = landmarks.left is not None or landmarks.right is not None
+        hands = _present_hands(landmarks)
 
         if self.state == SegmentState.IDLE:
-            if hands_present:
+            if hands:
                 self.state = SegmentState.ACTIVE
                 self._buffer = [landmarks]
-                self._prev_left, self._prev_right = landmarks.left, landmarks.right
+                self._prev_hands = hands
+                self._recent_motion.clear()
+                self._armed = True
                 self._still_since_ms = None
                 self._hands_absent_since_ms = None
             return None
 
         # ACTIVE (or just-emitted BOUNDARY, which behaves like ACTIVE going forward)
-        if not hands_present:
+        if not hands:
             self._hands_absent_since_ms = (
                 landmarks.ts_ms if self._hands_absent_since_ms is None else self._hands_absent_since_ms
             )
@@ -84,17 +117,25 @@ class Segmenter:
                 # Dropping the hands is how people end a sign, so it closes the word.
                 # Only frames with hands are buffered, so nothing idle is included, and
                 # a flicker shorter than min_frames is still discarded.
-                utterance = self._close() if len(self._buffer) >= self.min_frames else None
+                utterance = self._close() if self._armed and len(self._buffer) >= self.min_frames else None
                 self.reset()
                 return utterance
             return None
         self._hands_absent_since_ms = None
 
-        motion = max(
-            _hand_motion(self._prev_left, landmarks.left),
-            _hand_motion(self._prev_right, landmarks.right),
-        )
-        self._prev_left, self._prev_right = landmarks.left, landmarks.right
+        self._recent_motion.append(_hands_motion(self._prev_hands, hands))
+        self._prev_hands = hands
+        motion = _median(self._recent_motion)
+
+        if not self._armed:
+            # A word was just emitted. Wait for the hands to move before buffering the
+            # next one; a hand held in view must not be emitted again and again.
+            if motion >= self.motion_threshold:
+                self._armed = True
+                self._buffer = [landmarks]
+                self._still_since_ms = None
+            return None
+
         self._buffer.append(landmarks)
 
         if motion < self.motion_threshold:
@@ -111,10 +152,11 @@ class Segmenter:
         ):
             self.state = SegmentState.BOUNDARY
             utterance = self._close()
-            # Ready to capture the next word immediately; ACTIVE semantics resume.
+            # Ready for the next word once the hands move again; ACTIVE semantics resume.
             self.state = SegmentState.ACTIVE
             self._buffer = []
             self._still_since_ms = None
+            self._armed = False
             return utterance
 
         return None

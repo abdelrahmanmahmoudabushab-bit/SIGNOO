@@ -84,14 +84,63 @@ def test_a_brief_flicker_of_the_hand_is_not_a_word():
     assert seg.state == SegmentState.IDLE
 
 
-def test_a_hand_that_just_came_back_is_moving_not_still():
-    """With one hand absent in the previous frame, motion used to read as 0 and a
-    flickering hand looked like a held pause."""
-    from kiosk.segmentation import _hand_motion
+def test_a_hand_appearing_is_moving_and_a_missing_hand_is_not():
+    from kiosk.segmentation import _hands_motion
 
-    assert _hand_motion(None, _hand(0.5)) == float("inf")
-    assert _hand_motion(_hand(0.5), None) == 0.0
-    assert _hand_motion(None, None) == 0.0
+    assert _hands_motion([], [_hand(0.5)]) == float("inf")
+    assert _hands_motion([_hand(0.5)], []) == 0.0
+    assert _hands_motion([], []) == 0.0
+
+
+def test_motion_ignores_left_right_label_flips():
+    """MediaPipe reports the same hand as left on one frame and right on the next; that
+    must not read as a hand vanishing and a new one appearing."""
+    seg = _seg()
+    t = 0
+    for i in range(6):
+        t += 30
+        seg.feed(Landmarks(ts_ms=t, pose=POSE, left=_hand(i * 0.1), right=None))
+    # The same, still hand now labelled as the right one on alternate frames.
+    emitted = []
+    for k in range(40):
+        t += 30
+        same = _hand(0.5)
+        hand = {"left": same, "right": None} if k % 2 == 0 else {"left": None, "right": same}
+        emitted.append(seg.feed(Landmarks(ts_ms=t, pose=POSE, **hand)))
+    assert any(emitted), "a still hand with flipping labels should still reach the pause boundary"
+
+
+def test_one_noisy_frame_does_not_restart_the_pause_timer():
+    seg = _seg()
+    t, emitted = 0, []
+    for i in range(6):                                     # move, then hold still
+        t += 30
+        seg.feed(Landmarks(ts_ms=t, pose=POSE, left=_hand(i * 0.1), right=None))
+    positions = [0.5] * 4 + [0.9] + [0.5] * 12             # a single jittery outlier mid-pause
+    for x in positions:
+        t += 30
+        emitted.append(seg.feed(Landmarks(ts_ms=t, pose=POSE, left=_hand(x), right=None)))
+    assert any(emitted)
+
+
+def test_a_hand_resting_in_view_is_not_emitted_over_and_over():
+    seg = _seg()
+    t, emitted = 0, []
+    for i in range(6):
+        t += 30
+        emitted.append(seg.feed(Landmarks(ts_ms=t, pose=POSE, left=_hand(i * 0.1), right=None)))
+    for _ in range(80):                                    # then rests, perfectly still, for 2.4 s
+        t += 30
+        emitted.append(seg.feed(Landmarks(ts_ms=t, pose=POSE, left=_hand(0.5), right=None)))
+    assert sum(u is not None for u in emitted) == 1
+
+    for i in range(6):                                     # moving again starts a new word...
+        t += 30
+        emitted.append(seg.feed(Landmarks(ts_ms=t, pose=POSE, left=_hand(0.5 + i * 0.1), right=None)))
+    for _ in range(20):
+        t += 30
+        emitted.append(seg.feed(Landmarks(ts_ms=t, pose=POSE, left=_hand(1.0), right=None)))
+    assert sum(u is not None for u in emitted) == 2        # ...which is emitted at its own pause
 
 
 def test_hands_leaving_returns_to_idle():
