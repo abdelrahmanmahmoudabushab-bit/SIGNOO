@@ -234,6 +234,17 @@ would have flattered this dataset. With 5 test signers the figure is noisy; trea
 unevenly", not as a benchmark. Mirroring helped because the signers include left-handed
 people; see the caution under Augmentation before enabling it for LIU.
 
+**Through the real kiosk path (2026-10-10).** `ml/evaluate.py` scores pre-extracted
+features, so it cannot see live failures. `python -m kiosk.replay` runs the same
+held-out videos through the kiosk's own live perception, segmenter and recognizer, in
+real time, as browser-style JPEG frames. First run: **0 of 8 clips produced a word**,
+because the segmenter threw a word away when the hands dropped out of frame and only
+emitted after a held 500 ms pause. After the fix (a word ends when the hands leave),
+on all 89 held-out clips: **71% correct**, 15% wrong, 15% no word, 18% split into
+several words. That 71% is the number a visitor would experience; 85.4% is the
+classifier alone. Most wrong answers are confident (0.88 to 0.93, above the 0.80
+commit threshold) because a closed set of 8 signs must name one of them for anything.
+
 **Limits.** 8 signs. Phone selfie video, not the kiosk camera, so accuracy on the
 kiosk will differ and has not been measured. Not reviewed by Deaf ASL signers. The
 kiosk shows the card as "Pilot" and it stays that way until Deaf ASL users have tried

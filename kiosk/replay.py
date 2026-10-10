@@ -30,8 +30,13 @@ JPEG_QUALITY = 70
 TAIL_SECONDS = 1.5      # still frames after the clip, so a final pause can close the word
 
 
-def replay_video(path: Path, recognizer, realtime: bool = True) -> list:
-    """Returns one Hypothesis per utterance the segmenter emitted for this video."""
+def replay_video(path: Path, recognizer, realtime: bool = True) -> tuple[list, dict]:
+    """Returns (one Hypothesis per utterance the segmenter emitted, diagnostics).
+
+    The diagnostics say how many perception results arrived, how many showed a hand,
+    and how many frames each utterance held, which is what tells a tracking failure
+    from a segmentation failure.
+    """
     import cv2
 
     segmenter = Segmenter(
@@ -44,6 +49,7 @@ def replay_video(path: Path, recognizer, realtime: bool = True) -> list:
     cap = cv2.VideoCapture(str(path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     hypotheses = []
+    stats = {"results": 0, "hand_frames": 0, "utterance_frames": []}
     last_jpeg = None
     index = 0
 
@@ -54,8 +60,11 @@ def replay_video(path: Path, recognizer, realtime: bool = True) -> list:
         landmarks = perception.latest()
         if landmarks is None:
             return
+        stats["results"] += 1
+        stats["hand_frames"] += landmarks.left is not None or landmarks.right is not None
         utterance = segmenter.feed(landmarks)
         if utterance is not None:
+            stats["utterance_frames"].append(len(utterance.landmarks))
             hypotheses.append(recognizer.classify(utterance))
 
     try:
@@ -81,7 +90,7 @@ def replay_video(path: Path, recognizer, realtime: bool = True) -> list:
     finally:
         cap.release()
         perception.close()
-    return hypotheses
+    return hypotheses, stats
 
 
 def main() -> None:
@@ -109,7 +118,7 @@ def main() -> None:
     wrong = []
     for n, video in enumerate(videos, 1):
         truth = video.parent.name
-        hyps = replay_video(video, pack.recognizer, realtime=not args.fast)
+        hyps, stats = replay_video(video, pack.recognizer, realtime=not args.fast)
         committed = [h for h in hyps if h.gloss is not None]
         if not hyps:
             outcome["no_utterance"] += 1
@@ -125,7 +134,9 @@ def main() -> None:
             outcome["wrong"] += 1
             wrong.append(f"{truth} -> {best.gloss} ({best.confidence:.2f})  {video.name}")
         print(f"[{n}/{len(videos)}] {truth:9s} utterances={len(hyps)} "
-              f"said={best.gloss if best else None}", flush=True)
+              f"said={best.gloss if best else None}  results={stats['results']} "
+              f"hand_frames={stats['hand_frames']} utt_frames={stats['utterance_frames']} "
+              f"{video.parent.parent.name}", flush=True)
 
     total = len(videos)
     print(f"\n{total} clips through the live path ({args.language})")
