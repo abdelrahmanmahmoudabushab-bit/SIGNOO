@@ -51,6 +51,18 @@ Blocks 1–4 are entirely on-device and offline. Block 5 is the only one that ne
 network — severing it degrades *improvement*, never *service* (§1's load-bearing
 decision, restated).
 
+### 1.1b One isolated engine per language
+
+Each sign language is its own engine: model, vocabulary, confidence bars, segmentation
+tuning, knowledge base and clip library (`core/languages.json`, loaded by
+`kiosk/languages.py`). The language card selects that engine as a unit. There is no
+fallback across languages: a language missing a part goes without it (not ready,
+questions refused, nothing played back) rather than borrowing another language's.
+
+Drift to resolve: B4 below still describes one shared backbone with per-language
+heads. The kiosk as built loads a separate checkpoint per language, which is what this
+rule requires at runtime.
+
 ### 1.1 Contracts between blocks
 
 Every block takes and returns plain data — no camera handles, no model objects, no

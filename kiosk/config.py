@@ -130,3 +130,12 @@ class Config:
 
 
 CONFIG = Config()
+
+# B3 defaults every language starts from; a language's own `segmentation` keys in
+# core/languages.json override them (LanguagePack.make_segmenter).
+SEGMENTATION_DEFAULTS = {
+    "pause_ms": CONFIG.segmentation_pause_ms,
+    "motion_threshold": CONFIG.segmentation_motion_threshold,
+    "hands_absent_ms": CONFIG.segmentation_hands_absent_ms,
+    "min_frames": CONFIG.min_utterance_frames,
+}

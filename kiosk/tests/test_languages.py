@@ -1,6 +1,6 @@
-"""Pressing a language card must put the visitor on *that language's* model and
-vocabulary, and a language with no trained model must be refused, never quietly
-served by another language's model."""
+"""Pressing a language card must put the visitor on *that language's* whole engine
+(model, vocabulary, knowledge base, clip library), and a language with no trained
+model must be refused, never quietly served by another language's."""
 from __future__ import annotations
 
 import asyncio
@@ -33,8 +33,33 @@ def _checkpoint(path: Path, labels: list[str], favoured: int) -> None:
                 "input_dim": FRAME_DIM * 2}, path)
 
 
+def _kb_entry(keywords: list[str], ar: str, en: str) -> dict:
+    return {"id": "kb_1", "site_id": "default", "keywords": keywords,
+            "answer_ar": ar, "answer_en": en, "updated_at": "2026-10-11T00:00:00Z"}
+
+
+def _clip(path: str | None) -> dict:
+    return {"clip_path": path, "recorded_by": None, "recorded_at": None}
+
+
+def _write(path: Path, data) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
 def _world(tmp_path: Path, asl_confident: float | None = None,
-           asl_segmentation: dict | None = None) -> LanguageRegistry:
+           asl_segmentation: dict | None = None, asl_kb: list | None = None,
+           asl_clips: bool = True) -> LanguageRegistry:
+    """`asl_kb=None` leaves the American pack with no knowledge base configured at all;
+    a list (even an empty one) gives it its own."""
+    # The Jordanian knowledge base also matches the Arabic for "dog", so an American
+    # visitor's question would be answered from it if anything were shared. The two
+    # clip libraries disagree about dog/cat for the same reason.
+    _write(tmp_path / "liu_kb.json", [_kb_entry(["مرحبا", "كلب"], "مرحبا شكرا", "hello thank you")])
+    _write(tmp_path / "liu_clips.json", {"marhaba": _clip("clips/liu/marhaba.bvh"), "shukran": _clip(None),
+                                         "dog": _clip(None), "cat": _clip("clips/liu/cat.bvh")})
+    _write(tmp_path / "asl_clips.json", {"dog": _clip("clips/asl/dog.bvh"), "cat": _clip(None)})
+    if asl_kb is not None:
+        _write(tmp_path / "asl_kb.json", asl_kb)
     (tmp_path / "models").mkdir()
     _checkpoint(tmp_path / "models" / "liu.pt", ["marhaba", "shukran"], favoured=0)
     _checkpoint(tmp_path / "models" / "asl.pt", ["dog", "cat"], favoured=0)
@@ -46,8 +71,11 @@ def _world(tmp_path: Path, asl_confident: float | None = None,
         ensure_ascii=False), encoding="utf-8")
     config = tmp_path / "languages.json"
     config.write_text(json.dumps([
-        {"code": "liu", "model": "models/liu.pt", "vocab": "liu_vocab.json", "status": "live", "real_data": False},
+        {"code": "liu", "model": "models/liu.pt", "vocab": "liu_vocab.json", "status": "live", "real_data": False,
+         "knowledge_base": "liu_kb.json", "clip_library": "liu_clips.json"},
         {"code": "asl", "model": "models/asl.pt", "vocab": "asl_vocab.json", "status": "pilot", "real_data": True,
+         **({"knowledge_base": "asl_kb.json"} if asl_kb is not None else {}),
+         **({"clip_library": "asl_clips.json"} if asl_clips else {}),
          **({"confident_threshold": asl_confident} if asl_confident else {}),
          **({"segmentation": asl_segmentation} if asl_segmentation else {})},
         {"code": "esl", "model": None, "vocab": None, "status": "coming_soon", "real_data": False},
@@ -122,6 +150,8 @@ def test_summary_tells_the_frontend_what_can_be_pressed(tmp_path):
     assert summary["asl"]["ready"] and summary["asl"]["status"] == "pilot"
     assert summary["asl"]["vocab_url"] == "/asl_vocab.json"
     assert not summary["esl"]["ready"] and summary["esl"]["vocab_url"] is None
+    assert summary["liu"]["has_knowledge_base"] and summary["liu"]["has_clip_library"]
+    assert not summary["asl"]["has_knowledge_base"] and summary["asl"]["has_clip_library"]
 
 
 class _FakeWS:
@@ -158,3 +188,91 @@ def test_a_language_without_a_model_is_refused_and_nothing_changes(tmp_path, mon
 
     assert conn.pack.code == "asl"                          # not silently reset or reassigned
     assert conn.ws.sent[-1]["code"] == "language_unavailable"
+
+
+def _connection(monkeypatch, registry, default: str = "liu"):
+    """A connection on `registry`, with the cloud phrasing call switched off."""
+    import kiosk.main as kiosk_main
+
+    monkeypatch.setattr(kiosk_main, "registry", registry)
+    monkeypatch.setattr(kiosk_main, "DEFAULT_LANGUAGE", default)
+    monkeypatch.setattr(kiosk_main.Dialogue, "_try_cloud", lambda self, question, entry: None)
+    return kiosk_main.KioskConnection(_FakeWS())
+
+
+def _ask(conn, lang: str, gloss: str) -> dict:
+    """Pick a language, sign one word, ask; returns the messages by type."""
+    asyncio.run(conn.handle({"type": "language", "lang": lang}))
+    conn.assembler.append(gloss)
+    conn.ws.sent.clear()
+    asyncio.run(conn.handle({"type": "ask"}))
+    return {m["type"]: m for m in conn.ws.sent}
+
+
+def test_a_question_is_answered_only_from_the_selected_languages_own_knowledge_base(tmp_path, monkeypatch):
+    """The Jordanian knowledge base matches this question, but an American visitor is
+    refused whether the American pack has an empty knowledge base or none at all."""
+    for n, asl_kb in enumerate(([], None)):
+        (tmp_path / str(n)).mkdir()
+        registry = _world(tmp_path / str(n), asl_kb=asl_kb)
+        _, score = registry.get("liu").kb.best_match("كلب")
+        assert score >= 0.2                                     # the Jordanian KB would answer it
+        assert (registry.get("asl").kb is None) == (asl_kb is None)
+
+        sent = _ask(_connection(monkeypatch, registry), "asl", "dog")
+        assert sent["answer"]["refused"]
+        assert "playback" not in sent
+
+    sent = _ask(_connection(monkeypatch, registry), "liu", "marhaba")
+    assert not sent["answer"]["refused"] and sent["answer"]["en"] == "hello thank you"
+
+
+def test_playback_and_unrenderable_words_use_the_selected_languages_own_clips(tmp_path, monkeypatch):
+    """The two clip libraries say opposite things about dog and cat; an American answer
+    must be described by the American one."""
+    registry = _world(tmp_path, asl_kb=[_kb_entry(["كلب"], "كلب قطة", "dog cat")])
+
+    sent = _ask(_connection(monkeypatch, registry), "asl", "dog")
+    assert sent["answer"]["unrenderable_words"] == ["cat"]
+    assert [(w["gloss_id"], w["has_clip"]) for w in sent["playback"]["words"]] == [("dog", True), ("cat", False)]
+
+    sent = _ask(_connection(monkeypatch, registry), "liu", "marhaba")
+    assert sent["answer"]["unrenderable_words"] == ["shukran"]
+    assert [(w["gloss_id"], w["has_clip"]) for w in sent["playback"]["words"]] == [("marhaba", True), ("shukran", False)]
+
+
+def test_a_language_without_a_clip_library_plays_nothing_rather_than_borrowing(tmp_path, monkeypatch):
+    registry = _world(tmp_path, asl_kb=[_kb_entry(["كلب"], "كلب قطة", "dog cat")], asl_clips=False)
+    assert registry.get("asl").clips is None
+
+    sent = _ask(_connection(monkeypatch, registry), "asl", "dog")
+    assert sent["answer"]["unrenderable_words"] == ["dog", "cat"]      # none of it can be signed back
+    assert sent["playback"]["words"] == []
+
+
+def test_ending_a_session_returns_the_connection_to_the_default_languages_engine(tmp_path, monkeypatch):
+    registry = _world(tmp_path, asl_kb=[])
+    liu, asl = registry.get("liu"), registry.get("asl")
+    conn = _connection(monkeypatch, registry)
+    asyncio.run(conn.handle({"type": "language", "lang": "asl"}))
+    assert (conn.dialogue.kb, conn.clips, conn.assembler.vocab) == (asl.kb, asl.clips, asl.vocab)
+
+    asyncio.run(conn._end_session())
+
+    assert conn.pack is liu
+    assert conn.dialogue.kb is liu.kb and conn.dialogue.vocab is liu.vocab
+    assert conn.clips is liu.clips and conn.dialogue.clip_library is liu.clips._entries
+    assert conn.assembler.vocab is liu.vocab
+
+
+def test_a_default_language_that_is_not_ready_gets_an_empty_engine_not_a_borrowed_one(tmp_path, monkeypatch):
+    """`ssl` is configured but its checkpoint is missing. A connection starting there
+    must not crash and must not pick up the Jordanian words, answers or clips."""
+    conn = _connection(monkeypatch, _world(tmp_path), default="ssl")
+    assert conn.pack.code == "ssl" and not conn.pack.ready
+    assert conn.dialogue.kb is None and conn.clips is None
+
+    conn.assembler.append("marhaba")
+    assert conn.assembler.render().ar == "⟨marhaba⟩"                     # no vocabulary: shown as unknown
+    asyncio.run(conn.handle({"type": "ask"}))
+    assert conn.ws.sent[-1]["type"] == "answer" and conn.ws.sent[-1]["refused"]

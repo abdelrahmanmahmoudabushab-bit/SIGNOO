@@ -58,15 +58,14 @@ from fastapi.staticfiles import StaticFiles
 
 from core.contracts import Hypothesis
 from kiosk.assembly import Assembler, Vocabulary
-from kiosk.config import CONFIG, REPO_ROOT
+from kiosk.config import CONFIG, REPO_ROOT, SEGMENTATION_DEFAULTS
 from kiosk.data_capture import (
     CapturedItem, SessionCapture, flush_pending_uploads, write_pending_upload,
 )
-from kiosk.dialogue import Dialogue, KnowledgeBase
+from kiosk.dialogue import Dialogue
 from kiosk.fleet import FleetReporter
 from kiosk.output import TTSEngine
 from kiosk.perception import HolisticPerception, PerceptionUnavailable, decode_base64_frame
-from kiosk.playback import ClipLibrary
 from kiosk.languages import LanguageRegistry
 from kiosk.segmentation import Segmenter
 from kiosk.session import Session, SessionState, configure_logging, telemetry_snapshot
@@ -95,26 +94,23 @@ async def _lifespan(_: FastAPI):
 
 app = FastAPI(title="SIGNOO kiosk", lifespan=_lifespan)
 
-# ── shared, process-wide singletons (models load once at startup, per SYSTEM_DESIGN.md §4.2) ──
-_vocab = Vocabulary(CONFIG.vocab_path)
-_clip_library = ClipLibrary(CONFIG.clip_library_path, _vocab)
-_kb = KnowledgeBase(CONFIG.knowledge_base_path)
+# ── process-wide singletons (models load once at startup, per SYSTEM_DESIGN.md §4.2) ──
 _tts = TTSEngine(enabled=CONFIG.tts_enabled)
 
-# One model + vocabulary per sign language (core/languages.json). A corrupt or missing
-# checkpoint leaves that one language unavailable (SYSTEM_DESIGN.md §6) rather than
-# stopping the process: the frontend still needs to serve a clear out-of-service state.
+# One isolated engine per sign language (core/languages.json): model, vocabulary,
+# confidence bars, segmentation tuning, knowledge base and clip library. A corrupt or
+# missing checkpoint leaves that one language unavailable (SYSTEM_DESIGN.md §6) rather
+# than stopping the process: the frontend still needs to serve a clear out-of-service state.
 DEFAULT_LANGUAGE = "liu"
-SEGMENTATION_DEFAULTS = {
-    "pause_ms": CONFIG.segmentation_pause_ms,
-    "motion_threshold": CONFIG.segmentation_motion_threshold,
-    "hands_absent_ms": CONFIG.segmentation_hands_absent_ms,
-    "min_frames": CONFIG.min_utterance_frames,
-}
 registry = LanguageRegistry(
     CONFIG.languages_path, REPO_ROOT,
     CONFIG.reject_threshold, CONFIG.confident_threshold, CONFIG.top_k_alternatives,
-    model_overrides={DEFAULT_LANGUAGE: CONFIG.model_path},   # keeps SIGNOO_MODEL_PATH working
+    # Keeps SIGNOO_MODEL_PATH / _VOCAB_PATH / _KB_PATH / _CLIP_LIBRARY_PATH working;
+    # they configure the default language only.
+    overrides={DEFAULT_LANGUAGE: {
+        "model": CONFIG.model_path, "vocab": CONFIG.vocab_path,
+        "knowledge_base": CONFIG.knowledge_base_path, "clip_library": CONFIG.clip_library_path,
+    }},
 )
 
 _background_tasks: set[asyncio.Task] = set()
@@ -158,31 +154,34 @@ class KioskConnection:
     def __init__(self, ws: WebSocket):
         self.ws = ws
         self.session = Session(kiosk_id=CONFIG.kiosk_id)
-        self.pack = registry.get(DEFAULT_LANGUAGE)
-        self.assembler = Assembler(self._vocab_for(self.pack))
-        self.segmenter = self._segmenter_for(self.pack)
-        self.dialogue = Dialogue(
-            _kb, CONFIG.kb_similarity_floor, CONFIG.claude_model, CONFIG.claude_timeout_s,
-            CONFIG.dialogue_cloud_enabled, _vocab, _clip_library._entries,
-        )
+        self._use_engine(registry.get(DEFAULT_LANGUAGE))
         self.capture = SessionCapture(
             session_id=self.session.correlation_id,
             kiosk_id=CONFIG.kiosk_id,
-            language="liu",
+            language=DEFAULT_LANGUAGE,
             consent_retention=False,
             started_at=datetime.now(timezone.utc).isoformat(),
         )
         self.perception: HolisticPerception | None = None
         self.pending_candidates: list[tuple[str, float]] | None = None
 
-    @staticmethod
-    def _vocab_for(pack) -> Vocabulary:
-        return pack.vocab if pack is not None and pack.vocab is not None else _vocab
-
-    @staticmethod
-    def _segmenter_for(pack) -> Segmenter:
-        """The chosen language's own word-boundary tuning over the kiosk defaults."""
-        return pack.make_segmenter(SEGMENTATION_DEFAULTS) if pack is not None else Segmenter(**SEGMENTATION_DEFAULTS)
+    def _use_engine(self, pack) -> None:
+        """Puts this connection on one language's whole engine. Every language-specific
+        part comes from `pack` and nothing is borrowed from another language: a missing
+        part is empty (no words, questions refused, nothing to play back).
+        """
+        self.pack = pack
+        vocab = pack.vocab if pack is not None and pack.vocab is not None else Vocabulary(None)
+        self.clips = pack.clips if pack is not None else None
+        self.assembler = Assembler(vocab)
+        self.segmenter = (pack.make_segmenter(SEGMENTATION_DEFAULTS) if pack is not None
+                          else Segmenter(**SEGMENTATION_DEFAULTS))
+        self.dialogue = Dialogue(
+            pack.kb if pack is not None else None,
+            CONFIG.kb_similarity_floor, CONFIG.claude_model, CONFIG.claude_timeout_s,
+            CONFIG.dialogue_cloud_enabled, vocab,
+            self.clips._entries if self.clips is not None else {},
+        )
 
     async def send(self, message: dict) -> None:
         await self.ws.send_text(json.dumps(message, ensure_ascii=False))
@@ -212,10 +211,7 @@ class KioskConnection:
                 await self.send({"type": "error", "code": "language_unavailable",
                                  "message": f"{code!r} has no trained model yet"})
                 return
-            # The whole engine switches together: model, vocabulary and boundary tuning.
-            self.pack = pack
-            self.assembler = Assembler(self._vocab_for(pack))
-            self.segmenter = self._segmenter_for(pack)
+            self._use_engine(pack)
             self.session.language = code
             self.capture.language = code
             self.session.transition(SessionState.LANGUAGE, language=self.session.language)
@@ -407,7 +403,8 @@ class KioskConnection:
             "refused": answer.refused, "unrenderable_words": answer.unrenderable_words,
         })
         if not answer.refused:
-            words = _clip_library.sequence_for_text(answer.ar, answer.en)
+            # This language's own clips; with no clip library there is nothing to play.
+            words = self.clips.sequence_for_text(answer.ar, answer.en) if self.clips is not None else []
             await self.send({
                 "type": "playback",
                 "words": [
@@ -438,14 +435,12 @@ class KioskConnection:
         if self.perception is not None:
             self.perception.close()
             self.perception = None
-        self.pack = registry.get(DEFAULT_LANGUAGE)
-        self.assembler = Assembler(self._vocab_for(self.pack))
-        self.segmenter = self._segmenter_for(self.pack)
+        self._use_engine(registry.get(DEFAULT_LANGUAGE))
         self.pending_candidates = None
         old_kiosk_id = self.session.kiosk_id
         self.session = Session(kiosk_id=old_kiosk_id)
         self.capture = SessionCapture(
-            session_id=self.session.correlation_id, kiosk_id=old_kiosk_id, language="liu",
+            session_id=self.session.correlation_id, kiosk_id=old_kiosk_id, language=DEFAULT_LANGUAGE,
             consent_retention=False, started_at=datetime.now(timezone.utc).isoformat(),
         )
 

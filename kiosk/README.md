@@ -52,20 +52,39 @@ Open `http://localhost:8000/` in a browser with a camera. `http://localhost:8000
 reports model-load status and telemetry (temperature/throttle are honestly
 `"unavailable"` — this is a dev machine, not a Jetson).
 
-## Languages (one model per sign language)
+## Languages (one isolated engine per sign language)
 
-`core/languages.json` lists every card on the language screen with its `model`,
-`vocab`, `status` (`live` | `pilot` | `coming_soon`) and `real_data` (was the model
-trained on real human signing). `kiosk/languages.py` loads each model that exists at
-startup. A language is **ready** only if its checkpoint and vocabulary load;
-`GET /languages` reports which are ready, and the frontend only lets those cards be
-pressed. Pressing a card puts that visitor on that language's model and vocabulary;
-selecting a language that is not ready returns `language_unavailable` and changes
-nothing, so one language is never quietly served by another's model.
+`core/languages.json` lists every card on the language screen. Each entry is that
+language's whole engine: `model`, `vocab`, optional `confident_threshold` /
+`reject_threshold`, optional `segmentation` tuning, `knowledge_base` and
+`clip_library`, plus `status` (`live` | `pilot` | `coming_soon`) and `real_data` (was
+the model trained on real human signing). `kiosk/languages.py` loads each one into a
+`LanguagePack` at startup.
+
+Pressing a card switches the visitor to that pack as a unit
+(`KioskConnection._use_engine`). Nothing is shared and nothing falls back across
+languages:
+
+- A language is **ready** only if its checkpoint and vocabulary load. Selecting one
+  that is not ready returns `language_unavailable` and changes nothing.
+- A language with no `knowledge_base` (or an empty one, like `asl` today:
+  `kiosk/data/knowledge_base_asl.json` is `[]`) refuses every question. It never
+  answers from another language's knowledge base.
+- A language with no `clip_library` sends an empty `playback` list and reports every
+  answer word as unrenderable. It never looks up another language's clips.
+- If the default language (`liu`) itself is not ready, a new connection holds an empty
+  engine: no vocabulary, questions refused, frames answered with `model_unavailable`.
+
+`GET /languages` reports `ready`, `has_knowledge_base` and `has_clip_library` per
+language; the frontend only lets ready cards be pressed.
 
 To bring a language live: train a checkpoint (`ml/train.py ... --out models/<name>.pt`),
-add its vocabulary file under `core/`, set `model` and `vocab` in `languages.json`, and
-restart. `SIGNOO_MODEL_PATH` still overrides the Jordanian (`liu`) checkpoint.
+add its vocabulary and clip library under `core/` and its knowledge base under
+`kiosk/data/`, set the paths in `languages.json`, and restart. The env overrides
+`SIGNOO_MODEL_PATH`, `SIGNOO_VOCAB_PATH`, `SIGNOO_KB_PATH` and
+`SIGNOO_CLIP_LIBRARY_PATH` apply to the default language (`liu`) only.
+`kiosk/replay.py` builds its segmenter from the same pack, so it mirrors the kiosk
+per language.
 `models/asl_pilot.pt` is the American pilot, trained on PopSign (CC BY 4.0) phone-camera
 clips, a handful of signs only; it is shown as "Pilot" and is not a Jordanian model.
 

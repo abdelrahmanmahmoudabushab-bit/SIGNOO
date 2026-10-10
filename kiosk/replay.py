@@ -20,17 +20,16 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from kiosk.config import CONFIG, REPO_ROOT
-from kiosk.languages import LanguageRegistry
+from kiosk.config import CONFIG, REPO_ROOT, SEGMENTATION_DEFAULTS
+from kiosk.languages import LanguagePack, LanguageRegistry
 from kiosk.perception import HolisticPerception
-from kiosk.segmentation import Segmenter
 
 MAX_SIDE = 640          # what a browser canvas sends, not the camera's native size
 JPEG_QUALITY = 70
 TAIL_SECONDS = 1.5      # still frames after the clip, so a final pause can close the word
 
 
-def replay_video(path: Path, recognizer, realtime: bool = True) -> tuple[list, dict]:
+def replay_video(path: Path, pack: LanguagePack, realtime: bool = True) -> tuple[list, dict]:
     """Returns (one Hypothesis per utterance the segmenter emitted, diagnostics).
 
     The diagnostics say how many perception results arrived, how many showed a hand,
@@ -39,12 +38,9 @@ def replay_video(path: Path, recognizer, realtime: bool = True) -> tuple[list, d
     """
     import cv2
 
-    segmenter = Segmenter(
-        pause_ms=CONFIG.segmentation_pause_ms,
-        motion_threshold=CONFIG.segmentation_motion_threshold,
-        hands_absent_ms=CONFIG.segmentation_hands_absent_ms,
-        min_frames=CONFIG.min_utterance_frames,
-    )
+    # The language's own boundary tuning over the kiosk defaults, as kiosk/main.py does.
+    segmenter = pack.make_segmenter(SEGMENTATION_DEFAULTS)
+    recognizer = pack.recognizer
     perception = HolisticPerception(stride=CONFIG.perception_stride)
     cap = cv2.VideoCapture(str(path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -106,7 +102,7 @@ def main() -> None:
 
     registry = LanguageRegistry(CONFIG.languages_path, REPO_ROOT, CONFIG.reject_threshold,
                                 CONFIG.confident_threshold, CONFIG.top_k_alternatives,
-                                model_overrides={args.language: Path(args.model)} if args.model else None)
+                                overrides={args.language: {"model": Path(args.model)}} if args.model else None)
     pack = registry.get(args.language)
     if pack is None or not pack.ready:
         raise SystemExit(f"language {args.language!r} has no loadable model")
@@ -128,7 +124,7 @@ def main() -> None:
         truth = video.parent.name
         group = "known" if truth in known_signs else "unknown"
         totals[group] += 1
-        hyps, stats = replay_video(video, recognizer, realtime=not args.fast)
+        hyps, stats = replay_video(video, pack, realtime=not args.fast)
 
         # What the kiosk would do with each utterance: commit a word, offer candidates
         # for the visitor to confirm, or refuse. Judge the clip by its most confident one.

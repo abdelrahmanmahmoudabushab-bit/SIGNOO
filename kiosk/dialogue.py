@@ -76,7 +76,7 @@ class KnowledgeBase:
 
 
 class Dialogue:
-    def __init__(self, kb: KnowledgeBase, similarity_floor: float, claude_model: str,
+    def __init__(self, kb: KnowledgeBase | None, similarity_floor: float, claude_model: str,
                  claude_timeout_s: float, cloud_enabled: bool, vocab, clip_library: dict):
         self.kb = kb
         self.similarity_floor = similarity_floor
@@ -102,7 +102,9 @@ class Dialogue:
         return flagged
 
     def answer(self, question: str) -> Answer:
-        entry, score = self.kb.best_match(question)
+        # A language with no knowledge base of its own refuses; it never answers
+        # from another language's.
+        entry, score = self.kb.best_match(question) if self.kb is not None else (None, 0.0)
         if entry is None or score < self.similarity_floor:
             return Answer(
                 ar="عذرًا، هذا السؤال خارج نطاق ما يمكنني الإجابة عنه هنا. "

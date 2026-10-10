@@ -13,8 +13,10 @@ from core.contracts import Rendered
 
 
 class Vocabulary:
-    def __init__(self, vocab_path: Path):
-        entries = json.loads(vocab_path.read_text(encoding="utf-8"))
+    def __init__(self, vocab_path: Path | None):
+        """`None` is an empty vocabulary: what a connection holds when its language has
+        none loaded, rather than another language's words."""
+        entries = json.loads(vocab_path.read_text(encoding="utf-8")) if vocab_path else []
         self._by_id = {e["id"]: e for e in entries}
 
     def __contains__(self, gloss_id: str) -> bool:
