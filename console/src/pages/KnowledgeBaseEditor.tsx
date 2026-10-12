@@ -4,6 +4,8 @@ import type { ClipLibrary, KBEntry } from "../api/types";
 import { can } from "../auth/permissions";
 import { useAuth } from "../auth/AuthContext";
 import { SourceTag } from "../components/SourceTag";
+import { WriteStatus } from "../components/WriteStatus";
+import { useWrite } from "../hooks/useWrite";
 
 // Splits an answer into rough "words" for the unrenderable-word check. Good enough for a
 // preview warning; the real word-boundary/lemma matching against core/vocab.json belongs on
@@ -53,6 +55,8 @@ export function KnowledgeBaseEditor() {
   const [entries, setEntries] = useState<KBEntry[] | null>(null);
   const [clipLibrary, setClipLibrary] = useState<ClipLibrary>({});
   const [source, setSource] = useState<"server" | "mock" | null>(null);
+  const [clipSource, setClipSource] = useState<"server" | "mock" | null>(null);
+  const write = useWrite();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<KBEntry | null>(null);
   const [saved, setSaved] = useState(false);
@@ -65,7 +69,8 @@ export function KnowledgeBaseEditor() {
       if (cancelled) return;
       setEntries(kb.data);
       setClipLibrary(clips.data);
-      setSource(kb.source === "server" && clips.source === "server" ? "server" : "mock");
+      setSource(kb.source);
+      setClipSource(clips.source);
       if (kb.data.length > 0) setSelectedId(kb.data[0].id);
     });
     return () => {
@@ -76,32 +81,42 @@ export function KnowledgeBaseEditor() {
   useEffect(() => {
     const found = entries?.find((e) => e.id === selectedId) ?? null;
     setDraft(found ? { ...found } : null);
-    setSaved(false);
   }, [selectedId, entries]);
 
   const previewText = useMemo(() => (draft ? `${draft.answer_ar} ${draft.answer_en}` : ""), [draft]);
 
-  async function onSave() {
+  // A refused save (403 for the role, 404 for an entry deleted meanwhile) shows the server's
+  // reason and leaves the entry list as it was; the draft keeps what was typed so it is not
+  // lost. "Saved." is only ever shown for a save a real server accepted.
+  function onSave() {
     if (!draft) return;
     const updated = { ...draft, updated_at: new Date().toISOString() };
-    await saveKBEntry(updated);
-    setEntries((prev) => prev?.map((e) => (e.id === updated.id ? updated : e)) ?? null);
-    setSaved(true);
+    setSaved(false);
+    return write.run(updated.id, () => saveKBEntry(updated), (_, savedTo) => {
+      setEntries((prev) => prev?.map((e) => (e.id === updated.id ? updated : e)) ?? null);
+      setSaved(savedTo === "server");
+    });
   }
 
   return (
     <section>
       <header className="view-header">
         <h1>Knowledge base (FR-W7)</h1>
-        <SourceTag source={source} />
+        <SourceTag source={source} label="entries" />
+        <SourceTag source={clipSource} label="clip library" />
       </header>
+      <WriteStatus write={write} />
       {!entries && <p>Loading…</p>}
       {entries && (
         <div className="kb-layout">
           <ul className="kb-list">
             {entries.map((e) => (
               <li key={e.id}>
-                <button className={e.id === selectedId ? "active" : undefined} onClick={() => setSelectedId(e.id)}>
+                <button className={e.id === selectedId ? "active" : undefined} onClick={() => {
+                    setSelectedId(e.id);
+                    setSaved(false);
+                  }}
+                >
                   {e.answer_en.slice(0, 40)}
                 </button>
               </li>
@@ -135,7 +150,9 @@ export function KnowledgeBaseEditor() {
                 />
               </label>
               {canEdit ? (
-                <button onClick={onSave}>Save</button>
+                <button disabled={write.busy !== null} onClick={onSave}>
+                  Save
+                </button>
               ) : (
                 <p className="hint">Your role ({user?.role}) can view but not edit knowledge-base entries.</p>
               )}

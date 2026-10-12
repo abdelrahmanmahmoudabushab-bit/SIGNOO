@@ -36,7 +36,11 @@ async def lifespan(_: FastAPI):
     # Dev-simulation convenience only; a real deployment migrates with Alembic
     # (server/alembic) instead of create_all — see server/README.md.
     init_db()
-    task = asyncio.create_task(scheduler_loop()) if settings.auto_train_enabled else None
+    # The loop does two jobs (the retention purge, and automatic training when enabled),
+    # so it runs if either is wanted. Several workers each run one; both jobs are safe
+    # to repeat (training takes a per-language lock, the purge is idempotent).
+    task = (asyncio.create_task(scheduler_loop())
+            if settings.auto_train_enabled or settings.retention_days > 0 else None)
     try:
         yield
     finally:

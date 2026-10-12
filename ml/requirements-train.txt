@@ -1,0 +1,8 @@
+# Training-time extras, on top of kiosk/requirements.txt. None of these run on the kiosk: the
+# finished checkpoint carries everything it needs (e.g. the word-name vectors), so the Jetson
+# loads no NLP library.
+#
+#   .venv/Scripts/python.exe -m pip install -r ml/requirements-train.txt
+#
+# ml/label_embeddings.py: multilingual sentence embeddings (Apache-2.0) for the text head.
+sentence-transformers==6.1.0

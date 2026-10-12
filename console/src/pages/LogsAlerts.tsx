@@ -3,11 +3,15 @@ import { acknowledgeAlert, fetchAlerts, fetchLogs } from "../api/endpoints";
 import type { AlertEntry, LogEntry } from "../api/types";
 import { SourceTag } from "../components/SourceTag";
 import { StatusPill } from "../components/StatusPill";
+import { WriteStatus } from "../components/WriteStatus";
+import { useWrite } from "../hooks/useWrite";
 
 export function LogsAlerts() {
   const [logs, setLogs] = useState<LogEntry[] | null>(null);
   const [alerts, setAlerts] = useState<AlertEntry[] | null>(null);
-  const [source, setSource] = useState<"server" | "mock" | null>(null);
+  const [logsSource, setLogsSource] = useState<"server" | "mock" | null>(null);
+  const [alertsSource, setAlertsSource] = useState<"server" | "mock" | null>(null);
+  const write = useWrite();
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -16,7 +20,8 @@ export function LogsAlerts() {
       if (cancelled) return;
       setLogs(l.data);
       setAlerts(a.data);
-      setSource(l.source === "server" && a.source === "server" ? "server" : "mock");
+      setLogsSource(l.source);
+      setAlertsSource(a.source);
     });
     return () => {
       cancelled = true;
@@ -32,17 +37,20 @@ export function LogsAlerts() {
     );
   }, [logs, query]);
 
-  async function onAck(id: string) {
-    await acknowledgeAlert(id);
-    setAlerts((prev) => prev?.map((a) => (a.id === id ? { ...a, acknowledged: true } : a)) ?? null);
-  }
+  // A refused acknowledgement shows the server's reason and the alert stays unacknowledged.
+  const onAck = (id: string) =>
+    write.run(`alert ${id}`, () => acknowledgeAlert(id), () =>
+      setAlerts((prev) => prev?.map((a) => (a.id === id ? { ...a, acknowledged: true } : a)) ?? null)
+    );
 
   return (
     <section>
       <header className="view-header">
         <h1>Logs and alerts (FR-W8)</h1>
-        <SourceTag source={source} />
+        <SourceTag source={alertsSource} label="alerts" />
+        <SourceTag source={logsSource} label="logs" />
       </header>
+      <WriteStatus write={write} />
 
       <h2>Alerts</h2>
       {!alerts && <p>Loading…</p>}
@@ -68,7 +76,13 @@ export function LogsAlerts() {
                 <td dir="ltr">{a.kiosk_id ?? "—"}</td>
                 <td>{a.message}</td>
                 <td>{new Date(a.raised_at).toLocaleString()}</td>
-                <td>{!a.acknowledged && <button onClick={() => onAck(a.id)}>Acknowledge</button>}</td>
+                <td>
+                  {!a.acknowledged && (
+                    <button disabled={write.busy === `alert ${a.id}`} onClick={() => onAck(a.id)}>
+                      Acknowledge
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

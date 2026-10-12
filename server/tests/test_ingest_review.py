@@ -9,7 +9,7 @@ def _upload(client, *, confidence, correction=None, predicted="marhaba", signer=
         "consent_retention": True, "started_at": "2026-01-01T00:00:00Z",
         "ended_at": "2026-01-01T00:01:00Z",
         "items": [{
-            "utterance_id": utterance_id, "landmarks": [[0.0] * 4], "signer_id": signer,
+            "utterance_id": utterance_id, "landmarks": [[0.0] * 203], "signer_id": signer,
             "predicted_gloss": predicted, "confidence": confidence, "correction": correction,
         }],
     }

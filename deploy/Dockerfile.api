@@ -1,0 +1,45 @@
+# SIGNOO server (B11-B16): the API, the scheduler loop, and the training subprocess
+# (ml/train.py, ml/evaluate.py) that the server starts itself.
+#
+# Build from the repo root:  docker build -f deploy/Dockerfile.api .
+# (deploy/docker-compose.yml does this.)
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONIOENCODING=utf-8 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# libpq is what psycopg2 links against; curl is for the container health check.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libpq5 curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# server/requirements.txt is a Windows freeze. Drop what only exists there (colorama) and what
+# a runtime image has no use for (pytest and its plugins), and take torch from PyTorch's CPU
+# wheel index: the default Linux wheel bundles CUDA and is gigabytes larger, for a droplet
+# with no GPU. Training here is the small landmark model, which a CPU handles.
+COPY server/requirements.txt /tmp/requirements.txt
+RUN grep -v -E '^(colorama|pytest|pluggy|iniconfig|torch)==' /tmp/requirements.txt > /tmp/requirements.filtered.txt \
+ && pip install -r /tmp/requirements.filtered.txt \
+ && pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+
+COPY server/ server/
+COPY core/ core/
+COPY ml/ ml/
+COPY deploy/entrypoint.sh /entrypoint.sh
+# The script may have been checked out with Windows line endings, which break `#!/bin/sh`.
+RUN sed -i 's/\r$//' /entrypoint.sh \
+ && chmod +x /entrypoint.sh \
+ && mkdir -p kiosk/data server/runs
+
+# Stamped at build time: the image has no .git, and model versions are named after the commit.
+ARG SIGNOO_CODE_COMMIT=unknown
+ENV SIGNOO_CODE_COMMIT=${SIGNOO_CODE_COMMIT}
+
+EXPOSE 8001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8001/health || exit 1
+ENTRYPOINT ["/entrypoint.sh"]

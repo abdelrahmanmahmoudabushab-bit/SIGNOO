@@ -19,6 +19,10 @@ models/
 kiosk/data/pending_uploads/*
 !kiosk/data/pending_uploads/.gitkeep
 
+# Deployment secrets. deploy/.env.example is the committed template; the filled-in file is not.
+.env
+deploy/.env
+
 # server/ dev database + training-run scratch space — not source.
 server/*.db
 server/runs/

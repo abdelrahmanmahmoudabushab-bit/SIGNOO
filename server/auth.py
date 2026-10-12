@@ -6,6 +6,7 @@ authenticated user".
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
 
@@ -70,13 +71,42 @@ def get_current_user(
     return CurrentUser(user_id=user.id, email=user.email, role=user.role)
 
 
-def require_kiosk_token(x_kiosk_token: str | None = Header(default=None)) -> None:
-    """Kiosk-facing endpoints (ingest, register, heartbeat) accept only requests that
-    carry the shared kiosk token. With no token configured the check is off, which is
-    only reachable in `dev`; production startup refuses a blank token."""
+def kiosk_token_for(kiosk_id: str) -> str:
+    """The credential issued to one kiosk in `per_kiosk` mode: HMAC-SHA256 of its id under
+    the server's master token. Derived, so the server stores nothing per kiosk and a
+    token leaked from one kiosk opens nothing belonging to another."""
+    return hmac.new(settings.kiosk_token.encode(), kiosk_id.encode(), hashlib.sha256).hexdigest()
+
+
+def require_kiosk_token(x_kiosk_token: str | None = Header(default=None)) -> str:
+    """Kiosk-facing endpoints (ingest, register, heartbeat, model download) accept only
+    requests that carry a kiosk token. Returns the token it was given so a handler that
+    knows the kiosk id can call `authorize_kiosk`.
+
+    "shared" mode is fully decided here. "per_kiosk" mode can only be decided once the
+    kiosk id is known, which for ingest and register is in the request body, so here it
+    only insists a token is present. With no master token configured the check is off,
+    which is only reachable in `dev`; production startup refuses a blank token.
+    """
     expected = settings.kiosk_token
-    if expected and not hmac.compare_digest(x_kiosk_token or "", expected):
+    presented = x_kiosk_token or ""
+    if not expected:
+        return presented
+    if settings.kiosk_token_mode == "per_kiosk":
+        if not presented:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid kiosk token")
+    elif not hmac.compare_digest(presented, expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid kiosk token")
+    return presented
+
+
+def authorize_kiosk(presented: str, kiosk_id: str) -> None:
+    """In `per_kiosk` mode, 401 unless `presented` is the token issued to `kiosk_id`."""
+    if not settings.kiosk_token or settings.kiosk_token_mode != "per_kiosk":
+        return
+    if not hmac.compare_digest(presented, kiosk_token_for(kiosk_id)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail=f"this token was not issued to kiosk '{kiosk_id}'")
 
 
 def require_role(*allowed: str):

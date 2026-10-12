@@ -145,6 +145,29 @@ select {
   border-color: var(--warning);
 }
 
+/* A write that reached no server (components/WriteStatus.tsx): same warning colour as the
+   mock source tag, so "this did not really happen" reads the same everywhere. */
+.mock-write-note {
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+
+.language-select {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+.champion-line {
+  margin-block-end: 0.75rem;
+}
+.champion-mark {
+  color: var(--success);
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;

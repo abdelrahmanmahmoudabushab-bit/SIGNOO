@@ -18,11 +18,12 @@ import torch
 from torch.utils.data import DataLoader
 
 from data import SignDataset, load_manifest, split_by_signer
-from model import SignTransformer
+from model import build_model
 
 
-def predict(model, samples, labels, device, batch_size=32):
-    loader = DataLoader(SignDataset(samples, labels, augment=False), batch_size=batch_size)
+def predict(model, samples, labels, device, batch_size=32, feature_version=1):
+    loader = DataLoader(SignDataset(samples, labels, augment=False, feature_version=feature_version),
+                        batch_size=batch_size)
     preds, probs = [], []
     model.eval()
     with torch.no_grad():
@@ -51,10 +52,9 @@ def main():
     split = json.loads(Path(args.split).read_text(encoding="utf-8"))
     _, _, test = split_by_signer(samples, split["val"], split["test"])
 
-    model = SignTransformer(input_dim=ckpt["input_dim"], num_classes=len(labels)).to(device)
-    model.load_state_dict(ckpt["model"])
+    model = build_model(ckpt).to(device)
 
-    preds, probs = predict(model, test, labels, device)
+    preds, probs = predict(model, test, labels, device, feature_version=ckpt.get("feature_version", 1))
     truth = np.array([labels[s.sign_id] for s in test])
     correct = preds == truth
 

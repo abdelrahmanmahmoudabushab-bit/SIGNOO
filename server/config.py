@@ -27,6 +27,11 @@ class Settings:
     # Shared secret kiosks send as `X-Kiosk-Token` on ingest/register/heartbeat. Blank
     # means no check, which production startup refuses (see server/main.py).
     kiosk_token: str = os.environ.get("SIGNOO_KIOSK_TOKEN", "")
+    # "shared": every kiosk sends `kiosk_token` itself (simple; one stolen kiosk exposes
+    # the whole fleet). "per_kiosk": each kiosk sends HMAC-SHA256(kiosk_token, kiosk_id),
+    # so a token only works for the one kiosk id it was issued for and `kiosk_token`
+    # stays on the server as the issuing key (server/scripts/kiosk_token.py prints them).
+    kiosk_token_mode: str = os.environ.get("SIGNOO_KIOSK_TOKEN_MODE", "shared")
     # Browser origins allowed to call the API (the console's address). Empty = same-origin only.
     cors_origins: tuple[str, ...] = tuple(
         o.strip() for o in os.environ.get("SIGNOO_CORS_ORIGINS", "").split(",") if o.strip()
@@ -43,6 +48,9 @@ class Settings:
     kiosk_kb_path: Path = field(
         default_factory=lambda: REPO_ROOT / "kiosk" / "data" / "knowledge_base.json"
     )
+
+    # The same file the kiosk reads: which files each language's engine owns.
+    languages_path: Path = field(default_factory=lambda: REPO_ROOT / "core" / "languages.json")
 
     ml_dir: Path = field(default_factory=lambda: REPO_ROOT / "ml")
     models_dir: Path = field(default_factory=lambda: REPO_ROOT / "models")
@@ -71,6 +79,15 @@ class Settings:
         code.strip() for code in os.environ.get("SIGNOO_AUTO_TRAIN_LANGUAGES", "liu").split(",") if code.strip()
     )
 
+    # A training run holds a per-language lock for at most this long; a lock older than
+    # that was left by a process that died mid-run and may be taken over.
+    training_lease_minutes: float = float(os.environ.get("SIGNOO_TRAINING_LEASE_MIN", "180"))
+
+    # Uploaded clips nobody has reviewed are deleted after this many days, so a backlog
+    # cannot keep a visitor's landmarks indefinitely. Reviewed clips (confirmed/corrected)
+    # are kept: they are the training set. 0 disables the purge.
+    retention_days: int = int(os.environ.get("SIGNOO_RETENTION_DAYS", "30"))
+
     # FR-L7 shadow evaluation: how many reviewed live items, newer than the candidate,
     # it must be scored on, and how far below the champion it may fall.
     shadow_min_items: int = int(os.environ.get("SIGNOO_SHADOW_MIN_ITEMS", "30"))
@@ -89,6 +106,8 @@ def startup_problems(s: Settings) -> list[str]:
         problems.append("SIGNOO_JWT_SECRET must be set to a random value of at least 32 characters")
     if not s.kiosk_token:
         problems.append("SIGNOO_KIOSK_TOKEN must be set so only your kiosks can upload and register")
+    if s.kiosk_token_mode not in ("shared", "per_kiosk"):
+        problems.append(f"SIGNOO_KIOSK_TOKEN_MODE must be 'shared' or 'per_kiosk', not {s.kiosk_token_mode!r}")
     return problems
 
 

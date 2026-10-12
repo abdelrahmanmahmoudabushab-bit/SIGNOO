@@ -59,7 +59,16 @@ export function FleetView() {
                 <td>
                   <StatusPill status={k.health} />
                 </td>
-                <td dir="ltr">{k.model_version}</td>
+                <td dir="ltr">
+                  {/* One model per language engine when the kiosk reports them; otherwise the single version it has. */}
+                  {Object.keys(k.model_versions).length > 0
+                    ? Object.entries(k.model_versions).map(([code, version]) => (
+                        <div key={code}>
+                          {code.toUpperCase()}: {version}
+                        </div>
+                      ))
+                    : k.model_version}
+                </td>
                 <td>{formatUptime(k.uptime_seconds)}</td>
                 <td>{k.temperature_c === null ? "unavailable (non-Jetson)" : `${k.temperature_c}°C`}</td>
                 <td>{new Date(k.last_contact).toLocaleString()}</td>

@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
-import { fetchModelRegistry, fetchTrainingRuns } from "../api/endpoints";
+import { useAuth } from "../auth/AuthContext";
+import { can } from "../auth/permissions";
+import { fetchModelRegistry, fetchTrainingRuns, triggerTraining } from "../api/endpoints";
 import { GATE_CRITERIA, type ModelRegistryEntry, type TrainingRun } from "../api/types";
+import { LanguageSelect } from "../components/LanguageSelect";
 import { SourceTag } from "../components/SourceTag";
+import { WriteStatus } from "../components/WriteStatus";
+import { useLanguage } from "../hooks/useLanguage";
+import { useWrite } from "../hooks/useWrite";
 
 // FR-W5: show every one of the 7 DR-6 gate criteria explicitly, never collapse to a single
 // pass/fail badge — the whole point of the gate is that "the judgement is not automatic",
@@ -36,36 +42,77 @@ function GateVerdict({ entry }: { entry: ModelRegistryEntry | undefined }) {
 }
 
 export function TrainingVisibility() {
-  const [runs, setRuns] = useState<TrainingRun[] | null>(null);
-  const [registry, setRegistry] = useState<ModelRegistryEntry[] | null>(null);
-  const [source, setSource] = useState<"server" | "mock" | null>(null);
+  const { user } = useAuth();
+  const selection = useLanguage();
+  const { language } = selection;
+  // Runs and registry rows are kept with the language they were fetched for: a candidate is
+  // only ever compared with a champion of its own language.
+  const [loaded, setLoaded] = useState<{ language: string; runs: TrainingRun[]; registry: ModelRegistryEntry[] } | null>(null);
+  const [runsSource, setRunsSource] = useState<"server" | "mock" | null>(null);
+  const [registrySource, setRegistrySource] = useState<"server" | "mock" | null>(null);
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
+  const [trained, setTrained] = useState<ModelRegistryEntry | null>(null);
+  const write = useWrite();
 
   useEffect(() => {
+    if (!language) return;
     let cancelled = false;
-    Promise.all([fetchTrainingRuns(), fetchModelRegistry()]).then(([r, reg]) => {
+    Promise.all([fetchTrainingRuns(language), fetchModelRegistry(language)]).then(([r, reg]) => {
       if (cancelled) return;
-      setRuns(r.data);
-      setRegistry(reg.data);
-      setSource(r.source === "server" && reg.source === "server" ? "server" : "mock");
-      if (r.data.length > 0) setSelectedRun(r.data[0].run_id);
+      setLoaded({ language, runs: r.data, registry: reg.data });
+      setRunsSource(r.source);
+      setRegistrySource(reg.source);
+      setSelectedRun(r.data.length > 0 ? r.data[0].run_id : null);
+      setTrained(null);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [language]);
 
+  const current = loaded && loaded.language === language ? loaded : null;
+  const runs = current?.runs ?? null;
+  const registry = current?.registry ?? null;
   const run = runs?.find((r) => r.run_id === selectedRun) ?? null;
   const candidateEntry = registry?.find((m) => m.version === run?.candidate_version);
   const championEntry = registry?.find((m) => m.version === run?.champion_version);
+
+  // Training produces a candidate for this one language. It is never live by itself: it still
+  // has to pass the gate and be promoted on the registry page. With no server reachable
+  // nothing is trained and the page says so (data is null; see endpoints.ts::triggerTraining).
+  function onTrain(lang: string) {
+    setTrained(null);
+    return write.run(`Train ${lang.toUpperCase()}`, () => triggerTraining(lang), (model) => {
+      if (!model) return;
+      setTrained(model);
+      setLoaded((prev) => prev && prev.language === model.language ? { ...prev, registry: [...prev.registry, model] } : prev);
+    });
+  }
 
   return (
     <section>
       <header className="view-header">
         <h1>Training visibility (FR-W5)</h1>
-        <SourceTag source={source} />
+        <LanguageSelect selection={selection} />
+        <SourceTag source={runsSource} label="training runs" />
+        <SourceTag source={registrySource} label="gate results" />
       </header>
-      {!runs && <p>Loading…</p>}
+      {language && can(user?.role, "training:trigger") && (
+        <p>
+          <button disabled={write.busy !== null} onClick={() => onTrain(language)}>
+            {write.busy ? "Training…" : `Train a ${language.toUpperCase()} candidate now`}
+          </button>
+        </p>
+      )}
+      <WriteStatus write={write} />
+      {trained && (
+        <p role="status">
+          Trained <span dir="ltr">{trained.version}</span> for {trained.language.toUpperCase()}. It is a {trained.status},
+          not live: it goes through the gate on the Model registry page.
+        </p>
+      )}
+      {language && !runs && <p>Loading…</p>}
+      {runs && runs.length === 0 && <p>No training runs recorded for {language?.toUpperCase()}.</p>}
       {runs && (
         <div className="training-layout">
           <ul className="run-list">

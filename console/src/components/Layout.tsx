@@ -14,7 +14,10 @@ const NAV_ITEMS: { to: string; label: string; permission: Parameters<typeof can>
 ];
 
 export function Layout() {
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
+  // A demo sign-in (endpoints.ts::login, when no server answered) issues a "mock-token-..."
+  // that no server will accept, so everything this session does is mock. Say so on every page.
+  const mockSession = token?.startsWith("mock-token-") ?? false;
 
   return (
     <div className="app-shell">
@@ -33,6 +36,7 @@ export function Layout() {
           <div>
             <strong>{user?.username}</strong>
             <div className="role-tag">{user?.role}</div>
+            {mockSession && <div className="source-tag source-mock">demo sign-in (no server session)</div>}
           </div>
           <button onClick={logout}>Log out</button>
         </div>

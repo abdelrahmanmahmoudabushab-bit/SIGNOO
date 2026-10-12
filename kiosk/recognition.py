@@ -18,7 +18,12 @@ import numpy as np
 import torch
 
 from core.contracts import Hypothesis, Utterance
-from core.features import FRAME_DIM, add_velocity, normalise_frame, resample
+from core.features import FRAME_DIM, INPUT_DIMS, model_input, normalise_frame, resample
+
+# Feature versions B2 Perception supplies everything for. Version 3 also needs face landmarks
+# (core.features.face_features), which the live pipeline does not carry yet, so a version-3
+# checkpoint is refused here instead of being run on features it was never trained with.
+LIVE_FEATURE_VERSIONS = (1, 2, 4, 5)
 
 _ML_DIR = Path(__file__).resolve().parent.parent / "ml"
 if str(_ML_DIR) not in sys.path:
@@ -48,7 +53,7 @@ class Recognizer:
         self._load()
 
     def _load(self) -> None:
-        from model import SignTransformer  # ml/model.py, added to sys.path above
+        from model import build_model  # ml/model.py, added to sys.path above
 
         if not self.model_path.exists():
             raise ModelUnavailable(
@@ -63,7 +68,7 @@ class Recognizer:
         except Exception as exc:  # corrupt file, incompatible torch version, etc.
             raise ModelUnavailable(f"checkpoint at {self.model_path} could not be loaded: {exc}") from exc
 
-        required = {"model", "labels", "input_dim"}
+        required = {"labels", "input_dim"} | ({"members"} if "members" in checkpoint else {"model"})
         missing = required - checkpoint.keys()
         if missing:
             raise ModelUnavailable(
@@ -79,12 +84,40 @@ class Recognizer:
         for sign_id, index in label_to_index.items():
             self.labels[index] = sign_id
 
-        self.model = SignTransformer(input_dim=checkpoint["input_dim"], num_classes=len(self.labels))
-        self.model.load_state_dict(checkpoint["model"])
-        self.model.eval()
+        # Which features the model was trained on. Models from before feature versions
+        # existed have no key and are version 1. A version this kiosk does not know, or
+        # an input size that disagrees with it, is refused rather than fed wrong inputs.
+        self.feature_version = int(checkpoint.get("feature_version", 1))
+        if self.feature_version not in LIVE_FEATURE_VERSIONS or checkpoint["input_dim"] != INPUT_DIMS[self.feature_version]:
+            raise ModelUnavailable(
+                f"checkpoint at {self.model_path} uses feature version {self.feature_version} with input size "
+                f"{checkpoint['input_dim']}; this kiosk can run versions {LIVE_FEATURE_VERSIONS}"
+                + (" (version 3 needs face landmarks, which B2 Perception does not capture yet)"
+                   if self.feature_version == 3 else "")
+            )
+
+        # Optional per-word commit bars (ml/word_bars.py): words the model is shaky on need more
+        # confidence before they are committed without the visitor's confirmation.
+        bars = checkpoint.get("word_bars", {})
+        if not isinstance(bars, dict) or not all(isinstance(v, float) and 0.0 <= v <= 1.0 for v in bars.values()):
+            raise ModelUnavailable(f"checkpoint at {self.model_path} has malformed word_bars")
+        self.word_bars: dict[str, float] = dict(bars)
+
+        try:
+            self.model = build_model(checkpoint)
+        except (KeyError, RuntimeError, ValueError, TypeError) as exc:   # wrong shape, unknown architecture
+            raise ModelUnavailable(f"checkpoint at {self.model_path} could not be built: {exc}") from exc
+
+    def commit_bar(self, gloss: str | None) -> float:
+        """Confidence a word needs to be committed automatically (below it: offered as a candidate).
+
+        The language-wide bar, raised for words the model is known to confuse. A per-word bar can only
+        make the kiosk stricter than the language's calibrated bar, never looser.
+        """
+        return max(self.confident_threshold, self.word_bars.get(gloss, 0.0)) if gloss else self.confident_threshold
 
     def classify(self, utterance: Utterance) -> Hypothesis:
-        clip = self._features(utterance)
+        clip = self._features(utterance, self.feature_version)
         with torch.no_grad():
             logits = self.model(torch.from_numpy(clip).unsqueeze(0).float())
             probs = torch.softmax(logits, dim=-1).squeeze(0).numpy()
@@ -100,9 +133,22 @@ class Recognizer:
         return Hypothesis(gloss=best_label, confidence=best_prob, alternatives=alternatives)
 
     @staticmethod
-    def _features(utterance: Utterance) -> np.ndarray:
-        """Utterance -> the exact (SEQ_LEN, FRAME_DIM*2) tensor ml/train.py trained on."""
+    def _signing_seconds(utterance: Utterance) -> float:
+        """How long the sign took, measured the way training measured it: first to last frame with a
+        visible hand (ml/extract_landmarks.py idle_bounds), not the utterance's own length, which can
+        carry idle frames at either end."""
+        shown = [lm.ts_ms for lm in utterance.landmarks if lm.left is not None or lm.right is not None]
+        times = [lm.ts_ms for lm in utterance.landmarks]
+        if not shown or len(times) < 2:
+            return max(0.05, (utterance.t_end - utterance.t_start) / 1000.0)
+        interval = (times[-1] - times[0]) / (len(times) - 1)            # one frame, in ms
+        return max(0.05, (shown[-1] - shown[0] + interval) / 1000.0)
+
+    @staticmethod
+    def _features(utterance: Utterance, feature_version: int = 1) -> np.ndarray:
+        """Utterance -> the exact (SEQ_LEN, INPUT_DIMS[version]) tensor ml/train.py trained on."""
         frames = [normalise_frame(lm.pose, lm.left, lm.right) for lm in utterance.landmarks]
         clip = resample(frames)          # (SEQ_LEN, FRAME_DIM)
         assert clip.shape[1] == FRAME_DIM
-        return add_velocity(clip)        # (SEQ_LEN, FRAME_DIM*2)
+        duration = Recognizer._signing_seconds(utterance) if feature_version in (4, 5) else None
+        return model_input(clip, feature_version, duration=duration)

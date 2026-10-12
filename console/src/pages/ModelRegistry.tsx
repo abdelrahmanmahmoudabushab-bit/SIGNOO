@@ -3,68 +3,117 @@ import { useAuth } from "../auth/AuthContext";
 import { can } from "../auth/permissions";
 import { completeShadowRun, fetchFleet, fetchModelRegistry, pinModelToKiosk, promoteModel, rollbackModel } from "../api/endpoints";
 import type { KioskSummary, ModelRegistryEntry } from "../api/types";
+import { LanguageSelect } from "../components/LanguageSelect";
 import { SourceTag } from "../components/SourceTag";
 import { StatusPill } from "../components/StatusPill";
+import { WriteStatus } from "../components/WriteStatus";
+import { useLanguage } from "../hooks/useLanguage";
+import { useWrite } from "../hooks/useWrite";
+
+// Which model is live for ONE language. The server's rule (routers/registry.py) is "the
+// promoted version of this language with the latest promoted_at", but its response carries no
+// promoted_at, so with more than one promoted version the console cannot tell which is the
+// champion and says exactly that instead of guessing.
+function ChampionLine({ language, entries }: { language: string; entries: ModelRegistryEntry[] }) {
+  const lang = language.toUpperCase();
+  const promoted = entries.filter((e) => e.status === "promoted");
+  if (promoted.length === 0) {
+    return <p className="champion-line">No champion for {lang}: no model of this language has been promoted.</p>;
+  }
+  if (promoted.length > 1) {
+    return (
+      <p className="champion-line">
+        {lang} has {promoted.length} promoted versions. The server does not report which was promoted last, so the
+        champion for {lang} cannot be identified here.
+      </p>
+    );
+  }
+  return (
+    <p className="champion-line">
+      Champion for {lang}: <strong dir="ltr">{promoted[0].version}</strong>
+    </p>
+  );
+}
 
 export function ModelRegistry() {
   const { user } = useAuth();
-  const [entries, setEntries] = useState<ModelRegistryEntry[] | null>(null);
+  const selection = useLanguage();
+  const { language } = selection;
+  // Rows are kept with the language they were fetched for, so switching language can never
+  // show one language's models (or champion) under another language's name, even briefly.
+  const [loaded, setLoaded] = useState<{ language: string; entries: ModelRegistryEntry[] } | null>(null);
+  const entries = loaded && loaded.language === language ? loaded.entries : null;
   const [kiosks, setKiosks] = useState<KioskSummary[]>([]);
   const [source, setSource] = useState<"server" | "mock" | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [kioskSource, setKioskSource] = useState<"server" | "mock" | null>(null);
+  // Every action reports what the server said. A refusal (the promotion gate's 409, a 403)
+  // is shown as an error and the row is left unchanged; it is never displayed as a success.
+  const write = useWrite();
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchModelRegistry(), fetchFleet()]).then(([reg, fleet]) => {
+    fetchFleet().then((fleet) => {
       if (cancelled) return;
-      setEntries(reg.data);
       setKiosks(fleet.data);
-      setSource(reg.source);
+      setKioskSource(fleet.source);
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Every action reports what the server said. A refusal (the promotion gate's 409, a 403)
-  // is shown as an error and the row is left unchanged; it is never displayed as a success.
-  async function act(version: string, run: () => Promise<void>) {
-    setBusy(version);
-    setError(null);
-    try {
-      await run();
-    } catch (e) {
-      setError(`${version}: ${e instanceof Error ? e.message : "action failed"}`);
-    } finally {
-      setBusy(null);
-    }
-  }
+  useEffect(() => {
+    if (!language) return;
+    let cancelled = false;
+    fetchModelRegistry(language).then((reg) => {
+      if (cancelled) return;
+      setLoaded({ language, entries: reg.data });
+      setSource(reg.source);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language]);
 
-  function setStatus(version: string, status: string) {
-    setEntries((prev) => prev?.map((e) => (e.version === version ? { ...e, status: status as ModelRegistryEntry["status"] } : e)) ?? null);
-  }
+  const setStatus = (version: string) => (result: { status: string }) =>
+    setLoaded(
+      (prev) =>
+        prev && {
+          ...prev,
+          entries: prev.entries.map((e) => (e.version === version ? { ...e, status: result.status as ModelRegistryEntry["status"] } : e)),
+        }
+    );
 
-  const onPromote = (version: string) => act(version, async () => setStatus(version, (await promoteModel(version)).data.status));
-  const onCompleteShadow = (version: string) => act(version, async () => setStatus(version, (await completeShadowRun(version)).data.status));
-  const onRollback = (version: string) => act(version, async () => setStatus(version, (await rollbackModel(version)).data.status));
-  const onPin = (version: string, kioskId: string) => act(version, async () => void (await pinModelToKiosk(version, kioskId)));
+  const onPromote = (version: string) => write.run(version, () => promoteModel(version), setStatus(version));
+  const onCompleteShadow = (version: string) => write.run(version, () => completeShadowRun(version), setStatus(version));
+  const onRollback = (version: string) => write.run(version, () => rollbackModel(version), setStatus(version));
+  const onPin = (version: string, kioskId: string) => write.run(version, () => pinModelToKiosk(version, kioskId), () => {});
 
   const canPromote = can(user?.role, "registry:promote");
+  const champion = entries?.filter((e) => e.status === "promoted") ?? [];
 
   return (
     <section>
       <header className="view-header">
         <h1>Model registry (FR-W6)</h1>
-        <SourceTag source={source} />
+        <LanguageSelect selection={selection} />
+        <SourceTag source={source} label="registry" />
+        {canPromote && <SourceTag source={kioskSource} label="kiosk list" />}
       </header>
-      {error && <p role="alert" className="gate-fail">{error}</p>}
-      {!entries && <p>Loading…</p>}
-      {entries && (
+      <WriteStatus write={write} />
+      {language && !entries && <p>Loading…</p>}
+      {language && entries && (
+        <>
+          <ChampionLine language={language} entries={entries} />
+          {entries.length === 0 && <p>No model versions for {language.toUpperCase()} yet.</p>}
+        </>
+      )}
+      {language && entries && entries.length > 0 && (
         <table className="data-table">
           <thead>
             <tr>
               <th>Version</th>
+              <th>Language</th>
               <th>Commit</th>
               <th>Data snapshot</th>
               <th>Top-1</th>
@@ -77,30 +126,35 @@ export function ModelRegistry() {
             {entries.map((e) => (
               <tr key={e.version}>
                 <td dir="ltr">{e.version}</td>
+                <td>{e.language.toUpperCase()}</td>
                 <td dir="ltr">{e.code_commit}</td>
                 <td dir="ltr">{e.data_snapshot}</td>
                 <td>{(e.metrics.top1 * 100).toFixed(1)}%</td>
                 <td className={e.gate.passed ? "gate-pass" : "gate-fail"}>{e.gate.passed ? "pass" : "fail"}</td>
                 <td>
                   <StatusPill status={e.status} />
+                  {champion.length === 1 && champion[0].version === e.version && (
+                    <strong className="champion-mark"> champion for {e.language.toUpperCase()}</strong>
+                  )}
                 </td>
                 {canPromote && (
                   <td className="registry-actions">
                     {e.status === "candidate" && (
-                      <button disabled={!e.gate.passed || busy === e.version} onClick={() => onCompleteShadow(e.version)}>
+                      <button disabled={!e.gate.passed || write.busy === e.version} onClick={() => onCompleteShadow(e.version)}>
                         Complete shadow run
                       </button>
                     )}
-                    <button disabled={!e.gate.passed || e.status !== "shadow" || busy === e.version} onClick={() => onPromote(e.version)}>
+                    <button disabled={!e.gate.passed || e.status !== "shadow" || write.busy === e.version} onClick={() => onPromote(e.version)}>
                       Promote
                     </button>
-                    <button disabled={e.status !== "promoted" || busy === e.version} onClick={() => onRollback(e.version)}>
+                    <button disabled={e.status !== "promoted" || write.busy === e.version} onClick={() => onRollback(e.version)}>
                       Roll back
                     </button>
                     {kiosks.length > 0 && (
                       <select
                         defaultValue=""
-                        disabled={busy === e.version}
+                        aria-label={`Pin ${e.version} to a kiosk`}
+                        disabled={write.busy === e.version}
                         onChange={(ev) => {
                           if (ev.target.value) onPin(e.version, ev.target.value);
                         }}

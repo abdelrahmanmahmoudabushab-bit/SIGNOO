@@ -131,7 +131,7 @@ def main() -> None:
         def status(h) -> str:
             if h.gloss is None:
                 return "rejected"
-            return "committed" if h.confidence >= recognizer.confident_threshold else "candidates"
+            return "committed" if h.confidence >= recognizer.commit_bar(h.gloss) else "candidates"
 
         best = max(hyps, key=lambda h: h.confidence, default=None)
         if best is None:

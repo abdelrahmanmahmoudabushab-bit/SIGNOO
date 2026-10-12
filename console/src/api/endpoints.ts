@@ -11,6 +11,7 @@ import type {
   DatasetSession,
   KBEntry,
   KioskSummary,
+  Language,
   LiveSession,
   LogEntry,
   LoginResponse,
@@ -25,6 +26,12 @@ import type {
   TrainingRun,
 } from "./types";
 
+// A real server answered and said no (as opposed to no server being configured or reachable,
+// which apiFetch reports as status 0 or a network error).
+function isServerRefusal(err: unknown): boolean {
+  return err instanceof ApiError && err.status >= 400;
+}
+
 async function withMockFallback<T>(path: string, init: RequestInit | undefined, fallback: () => T): Promise<Sourced<T>> {
   try {
     const data = await apiFetch<T>(path, init);
@@ -35,9 +42,19 @@ async function withMockFallback<T>(path: string, init: RequestInit | undefined, 
     // an operator a model was promoted when the server said no. Reads, and any failure to
     // reach a server at all, still fall back to mock data.
     const isWrite = (init?.method ?? "GET").toUpperCase() !== "GET";
-    if (isWrite && err instanceof ApiError && err.status >= 400) throw err;
+    if (isWrite && isServerRefusal(err)) throw err;
     return { data: fallback(), source: "mock" };
   }
+}
+
+// Every language is its own engine: its own models, review queue and training runs. These two
+// keep a per-language request per-language even if a server ignored the query parameter.
+function languageQuery(language?: Language): string {
+  return language ? `?language=${encodeURIComponent(language)}` : "";
+}
+
+function inLanguage<T extends { language: Language }>(rows: T[], language?: Language): T[] {
+  return language ? rows.filter((r) => r.language === language) : rows;
 }
 
 // The real server has no offline-window concept exposed to the client (it already computed
@@ -51,6 +68,7 @@ function adaptKioskOut(k: ServerKioskOut): KioskSummary {
     language: k.language,
     health: !k.online ? "offline" : k.throttled ? "degraded" : "online",
     model_version: k.current_model_version ?? "(none deployed)",
+    model_versions: k.model_versions ?? {},
     uptime_seconds: k.uptime_s ?? 0,
     temperature_c: k.temperature_c,
     last_contact: k.last_heartbeat_at ?? "",
@@ -68,7 +86,10 @@ export async function login(username: string, password: string): Promise<Sourced
     });
     const user: AuthUser = { username, role: token.role };
     return { data: { token: token.access_token, user }, source: "server" };
-  } catch {
+  } catch (err) {
+    // A server that rejected these credentials must not be answered by a demo account of the
+    // same name: that would sign someone in with a mock token the server never issued.
+    if (isServerRefusal(err)) throw err;
     const user = mock.findMockUser(username, password);
     if (!user) throw new Error("invalid credentials");
     return { data: { token: `mock-token-${user.username}`, user }, source: "mock" };
@@ -108,12 +129,12 @@ function adaptReviewItem(item: ServerReviewItemOut): ReviewQueueItem {
   };
 }
 
-export async function fetchReviewQueue(): Promise<Sourced<ReviewQueueItem[]>> {
+export async function fetchReviewQueue(language?: Language): Promise<Sourced<ReviewQueueItem[]>> {
   try {
-    const raw = await apiFetch<ServerReviewItemOut[]>("/review/queue");
-    return { data: raw.map(adaptReviewItem), source: "server" };
+    const raw = await apiFetch<ServerReviewItemOut[]>(`/review/queue${languageQuery(language)}`);
+    return { data: inLanguage(raw.map(adaptReviewItem), language), source: "server" };
   } catch {
-    return { data: mock.mockReviewQueue, source: "mock" };
+    return { data: inLanguage(mock.mockReviewQueue, language), source: "mock" };
   }
 }
 
@@ -148,7 +169,10 @@ export async function submitReviewDecision(
       }),
     });
     return { data: body, source: "server" };
-  } catch {
+  } catch (err) {
+    // A refused decision (403 for the role, 422 for a correction with no label, 404 for an
+    // item that left the queue) was not recorded; reporting it as decided would lose it.
+    if (isServerRefusal(err)) throw err;
     return { data: body, source: "mock" };
   }
 }
@@ -169,19 +193,59 @@ export function retireSession(sessionId: string): Promise<Sourced<{ session_id: 
   );
 }
 
-export function fetchTrainingRuns(): Promise<Sourced<TrainingRun[]>> {
-  return withMockFallback("/training/runs", undefined, () => mock.mockTrainingRuns);
+// server/ has no GET /training/runs yet (only POST /training/trigger), so against a real
+// server this is always the mock list; the page's source tag says so.
+export async function fetchTrainingRuns(language?: Language): Promise<Sourced<TrainingRun[]>> {
+  const res = await withMockFallback(`/training/runs${languageQuery(language)}`, undefined, () => mock.mockTrainingRuns);
+  return { ...res, data: inLanguage(res.data, language) };
 }
 
-export function fetchModelRegistry(): Promise<Sourced<ModelRegistryEntry[]>> {
-  return withMockFallback("/registry", undefined, () => mock.mockRegistry); // server/routers/registry.py GET ""
+// server/routers/training.py POST /training/trigger trains a candidate for ONE language and
+// returns its registry row. There is deliberately no mock outcome: with no server, nothing was
+// trained, and inventing a model row would be a model nobody can load.
+export function triggerTraining(language: Language): Promise<Sourced<ModelRegistryEntry | null>> {
+  return withMockFallback<ModelRegistryEntry | null>(
+    "/training/trigger",
+    { method: "POST", body: JSON.stringify({ language }) },
+    () => null
+  );
+}
+
+// server/routers/registry.py GET "" (optional ?language=)
+export async function fetchModelRegistry(language?: Language): Promise<Sourced<ModelRegistryEntry[]>> {
+  const res = await withMockFallback(`/registry${languageQuery(language)}`, undefined, () => mock.mockRegistry);
+  return { ...res, data: inLanguage(res.data, language) };
+}
+
+// The languages this console can work on. The server has no "list languages" endpoint, so the
+// list is the distinct `language` values in data it does serve: registered kiosks (their
+// default language and every language engine they report a model for), registry rows, and
+// pending review items. A language with none of those yet is not listed. Mock languages are
+// used only when no server answered at all, never mixed into a real server's list.
+export async function fetchLanguages(): Promise<Sourced<Language[]>> {
+  type Row = { language: Language; model_versions?: Record<Language, string> };
+  const distinct = (lists: Row[][]): Language[] => {
+    const seen = new Set<Language>();
+    for (const row of lists.flat()) {
+      if (row.language) seen.add(row.language);
+      for (const code of Object.keys(row.model_versions ?? {})) seen.add(code);
+    }
+    return [...seen];
+  };
+  const answers = await Promise.allSettled([
+    apiFetch<Row[]>("/fleet/kiosks"),
+    apiFetch<Row[]>("/registry"),
+    apiFetch<Row[]>("/review/queue"),
+  ]);
+  const fromServer = answers.flatMap((a) => (a.status === "fulfilled" ? [a.value] : []));
+  if (fromServer.length > 0) return { data: distinct(fromServer), source: "server" };
+  return { data: distinct([mock.mockKiosks, mock.mockRegistry, mock.mockReviewQueue]), source: "mock" };
 }
 
 export function promoteModel(version: string): Promise<Sourced<{ version: string; status: string }>> {
   // server/routers/registry.py requires status "shadow" + a passed gate before promoting
-  // (409 otherwise) — a promote click on a candidate still in shadow will correctly fail
-  // server-side and fall back to the mock outcome here; see ModelRegistry.tsx for the
-  // shadow-complete step this depends on.
+  // (409 otherwise). That refusal is rethrown by withMockFallback and shown by
+  // ModelRegistry.tsx; it never falls back to the mock outcome below.
   return withMockFallback(
     `/registry/${version}/promote`,
     { method: "POST" },

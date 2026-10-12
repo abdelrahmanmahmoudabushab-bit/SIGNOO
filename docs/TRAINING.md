@@ -285,3 +285,109 @@ That 47% is still too high to call safe. It will not come down by threshold tuni
 kiosk will differ and has not been measured. Not reviewed by Deaf ASL signers. The
 kiosk shows the card as "Pilot" and it stays that way until Deaf ASL users have tried
 it on the kiosk camera. `models/` is gitignored; rebuild from the steps above.
+
+## American, 400+ words (2026-10-12) — a research prototype, not a product
+
+Goal: take `asl` from 8 words to 400+. **The model trained here is not shippable**: it uses
+**ASL Citizen** (Microsoft Research License: non-commercial research use only; ROADMAP risk R12).
+Using it for a commercial kiosk needs Microsoft's permission (ASL_Citizen@microsoft.com). Keep that
+in the checkpoint's notes. PopSign (CC BY 4.0) is the only licence-clean part.
+
+**Data.** PopSign: 50 words (`core/vocab_asl.json`), ≤3 clips per signer per word. ASL Citizen
+(2,731 glosses, 83k webcam videos, 52 signers, the dataset's own signer-disjoint split): 421 words
+chosen in `ml/asl_citizen_words.json` (id → Arabic gloss; **the Arabic is unreviewed machine
+translation, have a Deaf Arabic-speaking reviewer check it**). A word is matched to a gloss by exact
+lower-case name; variants (`ABOUT1`/`ABOUT2`) are never matched. 434 words overall.
+
+```bash
+# the zip is 46 GB; `curl -C -` resumes, but check it afterwards: a resumed download corrupted
+# entries in the middle of this one (CRC errors) although the size looked right
+python ml/import_asl_citizen.py data/asl_citizen/ASL_Citizen.zip --out data/asl_citizen/raw \
+       --per-sign 16 --train-per-sign 30        # --train-per-sign: top up with training signers
+python ml/extract_landmarks.py data/asl_citizen/raw --out data/asl_citizen/processed \
+       --max-side 480 --trim-idle --hand-fallback --retry-side 720 --face --stride 2 --workers 2
+python ml/merge_datasets.py --out data/asl_all --source data/popsign/processed \
+       --source data/asl_citizen/processed --max-train-per-sign 40
+```
+
+**Why `--train-per-sign`.** A uniform pick across signers sends a third of the clips (the dataset's
+validation and test signers) to data the model never trains on: the first merge had a median of 4
+training clips per word. Training clips per word is the lever accuracy depends on most.
+
+**Better extraction** (`ml/extract_landmarks.py`; every option is off by default, so a plain run
+behaves as before):
+
+| Option | What it does | Measured |
+|---|---|---|
+| `--hand-fallback` | a dedicated MediaPipe hand detector on frames where Holistic lost a hand; each hand goes to the nearer *pose wrist*, never by MediaPipe's own left/right label | hand visibility on the 8 worst clips 0.19 → 0.28 |
+| `--retry-side N` | re-run a clip whose hands were found in under 60% of frames at a larger size, keep the better pass | included above |
+| `--rtmw-fallback` | last-resort hands from RTMW (OpenMMLab; `rtmlib`, ONNX Runtime, CPU). 2-D, so z = 0; ~6× slower | hand found in **48%** of frames on the same 8 clips vs **12%** for MediaPipe+fallback; drawn on a frame, the 21 points sit on a motion-blurred hand MediaPipe misses |
+| `--face` | writes `<clip>.face`, (64, 12) face features: brow raise, eye openness, mouth opening/width/corner lift, head roll/yaw/pitch, brow furrow | extraction only; see feature versions |
+| `--stride 2` | track every second frame (clips are resampled to 64 anyway) | halves the time |
+
+**Feature versions** (`core/features.py: model_input`, recorded in the checkpoint). 1 = position +
+velocity (every model before this). 2 = + hand shape: 15 finger-flexion cosines, thumb-tip distances,
+tip reach, finger spread and palm normal per hand, all scale-free and computed from the landmarks
+already stored, so no re-tracking. 3 = + the face features above. **The kiosk runs 1 and 2 only**:
+it refuses a version-3 checkpoint, because B2 Perception does not carry face landmarks yet, and the
+server's shadow scoring refuses it for the same reason.
+
+**Model and training** (`ml/model.py`, `ml/train.py`; all new options default to the old behaviour):
+`--arch signnet` is a conv stem + Transformer + attention pooling; `--balance` class-balanced
+sampling; `--supcon` supervised contrastive loss (positives are other signers' clips of the same
+word); `--strong-augment` hand dropout, small rotation and zoom; `--text-embeddings` a head that
+scores a clip by cosine similarity to each word's name embedding (`ml/label_embeddings.py`:
+multilingual MiniLM, English and Arabic names averaged), so a word with few clips borrows structure
+from related words; `--pretrained` an encoder from `ml/pretrain.py` (masked-frame reconstruction on
+training signers' clips only, no labels). `ml/ensemble.py` averages checkpoints;
+`ml/word_bars.py` writes per-word commit bars (precision ≥ target on the *validation* signers) into a
+checkpoint, which the kiosk applies as `max(language bar, word bar)`: a word can only get stricter.
+Every consumer rebuilds a model with `ml/model.py: build_model`, so none can build a different
+network from the one trained. NLP libraries (`ml/requirements-train.txt`) are training-only; the
+checkpoint carries the word vectors.
+
+**Not done, deliberately.** Language-model rescoring of word sequences: there is no sentence-level
+sign data to show it helps. The kiosk cannot use face features. The Arabic glosses and every ASL
+Citizen label are unreviewed by Deaf signers.
+
+### The ASL data system (`ml/asldb.py`, `data/asl.db`)
+
+One SQLite file (standard library, nothing to install) that knows every clip, signer, word, licence
+and model, so the rules this project must not break are enforced by the data, not remembered:
+
+- **A signer is in exactly one split**, and the split belongs to the signer, not the clip. A clip
+  cannot be random-split away from its signer.
+- **`freeze-test` locks the test signers**; triggers refuse any later move, unfreeze or delete (DR-7a:
+  the benchmark cannot drift into training).
+- **Every clip has a source and every source a licence.** `export --licence-clean-only` builds a
+  training set from commercially usable data only; `model-add` records whether a model is clean, so a
+  research-only model cannot be mistaken for a shippable one (R12).
+- **Labels are `unreviewed` until a Deaf reviewer confirms them**; `export --confirmed-only` trains on
+  reviewed clips alone. `review-sheet` writes a CSV (video path, Arabic gloss) for a reviewer to mark
+  `confirmed`/`rejected`; `review-import` reads it back and refuses a decision with no reviewer name.
+
+```bash
+python ml/asldb.py ingest --source popsign --root data/popsign/processed
+python ml/asldb.py ingest --source asl_citizen --root data/asl_citizen/processed
+python ml/asldb.py gaps          # what stands between this data and a trustworthy model, with fixes
+python ml/asldb.py freeze-test && python ml/asldb.py check
+python ml/asldb.py export --out data/asl_all --max-train-per-sign 24     # manifest.json / split.json
+python ml/asldb.py review-sheet --out data/asl_review/review_sheet.csv --per-word 2
+python ml/asldb.py model-add models/asl.pt --name asl434 --sources popsign,asl_citizen
+```
+
+**Gaps found on 2026-10-12 and what was done** (`asldb gaps`):
+
+| Gap | Finding | Action |
+|---|---|---|
+| Training clips per word | 383 of 434 words under 20; median 8, minimum 4 | `--train-per-sign` top-up (2,838 clips queued); 43 more licence-clean PopSign words downloading |
+| Class imbalance | PopSign words have up to 119 clips, most others 4-10. On validation the commonest wrong answers were the best-supplied words (`happy→thankyou` 9, `please→thankyou` 8, `car→milk`, `cat→mom`) | cap training clips per word near the median (`export --max-train-per-sign`), train with `--balance` |
+| No negative examples | the model must name a word for anything it sees; 47% of unknown signs were accepted earlier | `import_asl_citizen.py --neg-glosses 250 --neg-holdout 80`: 750 clips of 250 out-of-vocabulary signs as `__other__` (the kiosk reads it as a refusal), 240 clips of 80 held-out signs as `__unseen__`, never trained on, for measuring false accepts |
+| Test signers | not frozen | frozen (16 signers) |
+| Labels | none confirmed by a Deaf reviewer | review sheet of 868 clips (2 per word, different signers) written; **needs a reviewer** |
+| Licence | 6,346 of 9,809 clips are research-only; 52 of 434 words have licence-clean data | PopSign has 106 more of the words (CC BY, ~400 GB); the smallest 43 are downloading; Kaggle `asl-signs` (CC BY) needs the competition rules accepted by a person |
+| Words never right on validation | 32, nearly all with under 10 clips | follows the clip top-up; re-check after |
+| Hands / face | 69 clips with hands barely tracked, face features on 3,526 of 9,809 clips | queued re-extraction with RTMW hand fallback and `--face` |
+
+A near-synonym pair (`pen`/`pencil`, `home`/`house`) may be one sign under two English words; only a
+Deaf reviewer can say. Until then they will confuse each other.

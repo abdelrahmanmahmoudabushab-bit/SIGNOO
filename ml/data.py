@@ -15,7 +15,7 @@ import numpy as np
 from torch.utils.data import Dataset
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from core.features import SEQ_LEN, add_velocity, mirror
+from core.features import FACE_DIM, FRAME_DIM, HAND_DIM, POSE_DIM, SEQ_LEN, mirror, mirror_face, model_input
 
 
 @dataclass
@@ -28,6 +28,30 @@ class Sample:
 
     def load(self) -> np.ndarray:
         return np.load(self.path).astype(np.float32)
+
+    def load_face(self) -> np.ndarray:
+        """(SEQ_LEN, FACE_DIM) face features saved beside the clip as `<clip>.face` by
+        `extract_landmarks.py --face`. Raises FileNotFoundError for a clip extracted without them."""
+        with open(self.path.with_suffix(".face"), "rb") as handle:
+            face = np.load(handle).astype(np.float32)
+        if face.shape != (len(self.load()), FACE_DIM):
+            raise ValueError(f"{self.path.with_suffix('.face')}: face features {face.shape} do not match the clip")
+        return face
+
+    def has_face(self) -> bool:
+        return self.path.with_suffix(".face").exists()
+
+    def load_meta(self) -> dict:
+        """The `<clip>.meta` written by extract_landmarks.py: fps, stride, trimmed span, duration, lineage."""
+        return json.loads(self.path.with_suffix(".meta").read_text(encoding="utf-8"))
+
+    def load_duration(self) -> float:
+        """The sign's real length in seconds. Raises FileNotFoundError for a clip extracted before metadata
+        was recorded: feature versions 4 and 5 cannot use those clips."""
+        return float(self.load_meta()["duration_s"])
+
+    def has_meta(self) -> bool:
+        return self.path.with_suffix(".meta").exists()
 
 
 def load_manifest(manifest_path) -> list[Sample]:
@@ -98,14 +122,48 @@ def describe(samples, name="dataset") -> str:
     )
 
 
+def _sample(arr, positions):
+    """(T, D) sampled at fractional frame `positions` by linear interpolation; positions outside the
+    clip hold its first or last frame (a loosely trimmed clip, not a made-up one)."""
+    idx = np.clip(np.asarray(positions, dtype=np.float64), 0, len(arr) - 1)
+    lo = np.floor(idx).astype(int)
+    hi = np.minimum(lo + 1, len(arr) - 1)
+    frac = (idx - lo)[:, None]
+    return (arr[lo] * (1 - frac) + arr[hi] * frac).astype(np.float32)
+
+
+def time_positions(rng, frames=SEQ_LEN, warp=0.25, knots=4, crop=0.08, loosen=0.04):
+    """Where to read the source clip so the result is a different *performance* of the same sign.
+
+    The clip always spans the whole sign (it was resampled that way), so a plain stretch changes
+    nothing: an earlier version of this augmentation resampled to a new length and straight back,
+    which is the identity. What actually varies between performances is (1) pacing within the sign,
+    a smooth non-uniform warp (fast preparation, slow stroke, ...), and (2) where the trim fell:
+    a little onset cut off, or a little extra rest kept.
+
+    Returns (positions, fraction): the (frames,) source positions, and the share of the original
+    duration the result covers (so a duration feature can follow the crop).
+    """
+    start = rng.uniform(-loosen, crop) if rng.random() < 0.5 else 0.0
+    end = 1.0 - (rng.uniform(-loosen, crop) if rng.random() < 0.5 else 0.0)
+    speeds = np.exp(rng.normal(0.0, warp, knots))                  # pace of each stretch of the sign
+    knot_source = np.concatenate([[0.0], np.cumsum(speeds) / speeds.sum()])
+    knot_target = np.linspace(0.0, 1.0, knots + 1)
+    warped = np.interp(np.linspace(0.0, 1.0, frames), knot_target, knot_source)   # monotone, 0 -> 1
+    return (start + warped * (end - start)) * (SEQ_LEN - 1), float(end - start)
+
+
 class SignDataset(Dataset):
     """Feature tensors with light augmentation, applied to the training split only."""
 
-    def __init__(self, samples, labels, augment=False, mirror_prob=0.0, rng_seed=0):
+    def __init__(self, samples, labels, augment=False, mirror_prob=0.0, rng_seed=0, feature_version=1,
+                 strong=False):
         self.samples = samples
         self.labels = labels
         self.augment = augment
         self.mirror_prob = mirror_prob
+        self.feature_version = feature_version
+        self.strong = strong
         self.rng = np.random.default_rng(rng_seed)
 
     def __len__(self):
@@ -114,13 +172,16 @@ class SignDataset(Dataset):
     def __getitem__(self, i):
         sample = self.samples[i]
         clip = sample.load()
+        face = sample.load_face() if self.feature_version == 3 else None
+        duration = sample.load_duration() if self.feature_version in (4, 5) else None
 
         if self.augment:
-            clip = self._augment(clip)
+            clip, face, duration = self._augment(clip, face, duration)
 
-        return add_velocity(clip), self.labels[sample.sign_id]
+        return (model_input(clip, self.feature_version, face=face, duration=duration),
+                self.labels[sample.sign_id])
 
-    def _augment(self, clip):
+    def _augment(self, clip, face=None, duration=None):
         """Perturbations that leave the sign's identity intact.
 
         Deliberately excluded: vertical flips (change meaning), large rotations (a
@@ -131,21 +192,21 @@ class SignDataset(Dataset):
 
         if rng.random() < self.mirror_prob:
             clip = mirror(clip)
+            if face is not None:
+                face = mirror_face(face)
 
-        # Speed: resample to a slightly shorter or longer clip, then back to SEQ_LEN.
-        if rng.random() < 0.5:
-            factor = rng.uniform(0.8, 1.25)
-            n = max(4, int(SEQ_LEN * factor))
-            idx = np.linspace(0, len(clip) - 1, n)
-            lo = np.floor(idx).astype(int)
-            hi = np.minimum(lo + 1, len(clip) - 1)
-            frac = (idx - lo)[:, None]
-            stretched = clip[lo] * (1 - frac) + clip[hi] * frac
-            idx2 = np.linspace(0, len(stretched) - 1, SEQ_LEN)
-            lo2 = np.floor(idx2).astype(int)
-            hi2 = np.minimum(lo2 + 1, len(stretched) - 1)
-            frac2 = (idx2 - lo2)[:, None]
-            clip = stretched[lo2] * (1 - frac2) + stretched[hi2] * frac2
+        # Pacing and trim: a different performance of the same sign (see time_positions). The face
+        # features are read at the same positions so they stay aligned with the landmarks, and the
+        # duration follows the crop plus a signer's own natural speed.
+        if rng.random() < 0.7:
+            positions, covered = time_positions(rng)
+            clip = _sample(clip, positions)
+            face = _sample(face, positions) if face is not None else None
+            if duration is not None:
+                duration = duration * covered * rng.uniform(0.85, 1.15)
+
+        if self.strong:
+            clip = self._strong(clip)
 
         # Landmark jitter, at roughly the scale of real tracker noise.
         clip = clip + rng.normal(0, 0.01, clip.shape).astype(np.float32)
@@ -157,5 +218,37 @@ class SignDataset(Dataset):
         if rng.random() < 0.3:
             drop = rng.random(len(clip)) < 0.1
             clip[drop] = 0.0
+            if face is not None:
+                face = face.copy()
+                face[drop] = 0.0
 
-        return clip.astype(np.float32)
+        return clip.astype(np.float32), face, duration
+
+    def _strong(self, clip):
+        """Heavier, still identity-preserving perturbations (SignNet recipe).
+
+        A hand lost for a stretch of the clip (the commonest real tracking failure, and the reason
+        the model must not hang on one hand's every frame); a small in-plane rotation (the camera is
+        never exactly level); a small zoom (the signer's distance to the camera). Rotations stay
+        within a few degrees: a sign's orientation is part of it.
+        """
+        rng = self.rng
+        clip = np.array(clip, dtype=np.float32, copy=True)
+        if rng.random() < 0.25:
+            start = rng.integers(0, max(1, len(clip) // 2))
+            span = rng.integers(len(clip) // 5, len(clip) * 2 // 5 + 1)
+            block = slice(POSE_DIM, POSE_DIM + 1 + HAND_DIM) if rng.random() < 0.5 \
+                else slice(POSE_DIM + 1 + HAND_DIM, FRAME_DIM)
+            clip[start:start + span, block] = 0.0
+        coords = np.ones(clip.shape[1], dtype=bool)
+        coords[[POSE_DIM, POSE_DIM + 1 + HAND_DIM]] = False          # presence flags are not coordinates
+        triples = clip[:, coords].reshape(len(clip), -1, 3)
+        if rng.random() < 0.5:
+            angle = float(np.clip(rng.normal(0, 0.06), -0.12, 0.12))
+            c, s = np.cos(angle), np.sin(angle)
+            x, y = triples[..., 0].copy(), triples[..., 1].copy()
+            triples[..., 0], triples[..., 1] = c * x - s * y, s * x + c * y
+        if rng.random() < 0.5:
+            triples *= rng.uniform(0.92, 1.08)
+        clip[:, coords] = triples.reshape(len(clip), -1)
+        return clip

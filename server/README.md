@@ -133,7 +133,11 @@ only; `dev` is also what the tests use). Anything not `dev` is treated as produc
 | Variable | Purpose |
 |---|---|
 | `SIGNOO_JWT_SECRET` | Signs console logins. At least 32 random characters; the built-in dev value is refused. |
-| `SIGNOO_KIOSK_TOKEN` | Shared secret kiosks send as `X-Kiosk-Token` on upload, register and heartbeat. Blank is refused. |
+| `SIGNOO_KIOSK_TOKEN` | The kiosk credential key. Blank is refused. In `shared` mode every kiosk sends it as `X-Kiosk-Token`; in `per_kiosk` mode it stays on the server and each kiosk sends its own derived token. |
+| `SIGNOO_KIOSK_TOKEN_MODE` | `shared` (default) or `per_kiosk`. In `per_kiosk` mode a token works only for the kiosk id it was issued for: `python -m server.scripts.kiosk_token <kiosk_id>`. A deployment should use `per_kiosk`. |
+| `SIGNOO_RETENTION_DAYS` | Unreviewed (pending/flagged) clips older than this are deleted by the scheduler loop (30; 0 disables). Reviewed clips are kept. |
+| `SIGNOO_TRAINING_LEASE_MIN` | A per-language training lock older than this is treated as left by a dead process and taken over (180). |
+| `SIGNOO_CODE_COMMIT` | Names model versions when there is no `.git` (a container image). |
 | `SIGNOO_DATABASE_URL` | Postgres in production; SQLite only for local dev. |
 | `SIGNOO_CORS_ORIGINS` | Comma-separated console origins allowed to call the API. Empty = same-origin only. |
 | `SIGNOO_AUTO_TRAIN`, `_HOURS`, `_POLL_MIN` | The 3-day candidate cycle (on by default, 72 h). |
@@ -148,14 +152,29 @@ reverse proxy) and rate-limit `/auth/login` there; neither is done in this proce
 
 - **B12 cadence (built 2026-10-10)**: `server/scheduler.py` trains a *candidate* every
   `SIGNOO_AUTO_TRAIN_HOURS` (default 72), polling every `SIGNOO_AUTO_TRAIN_POLL_MIN`
-  (60); it never promotes. It will not run until the benchmark signers have been
-  frozen by a deliberate first `POST /training/trigger`
+  (60); it never promotes. It will not run until the benchmark has been frozen
   (`server/runs/frozen_split.json`; later signers go to train). Set
   `SIGNOO_AUTO_TRAIN=0` to disable. The export step
   (`server/training.py::export_validated_manifest`) still refuses to run below 3
   distinct validated signers and raises `InsufficientDataError` (422), the expected
   steady state right after launch. Rows with `signer_id="unknown"` are never exported.
   The benchmark is frozen, not yet human-verified (DR-7a).
+- **The benchmark is anchored on enrolled signers only (changed 2026-10-12).** A kiosk
+  visit is its own "signer" (`visitor-<hex>`, one id per visit, `kiosk/data_capture.py`),
+  so the same person returning is several signers and could leak from training into the
+  benchmark. Visitor clips still **train**, but only a named person from a deliberate
+  data-collection session can be a benchmark signer. `POST /training/benchmark`
+  (engineer/admin) freezes validation and test signers explicitly; the first export
+  freezes them automatically only if two enrolled signers exist. It cannot be changed
+  afterwards. **Consequence: until enrolled signers have been recorded and reviewed, no
+  kiosk-only data can start the automatic cycle.** That is the intended behaviour, and it
+  makes data collection (docs/DATA_COLLECTION.md) the real gate.
+- **One training run per language (2026-10-12)**: `training_locks` row, taken by
+  `train_candidate` for the run's duration. A second trigger gets 409; the scheduler skips
+  quietly (and records no failed attempt). Safe with several server workers. A lock older
+  than `SIGNOO_TRAINING_LEASE_MIN` is taken over. `POST /training/trigger` still trains
+  inside the request; making it a background job needs a console change (it expects the
+  finished `ModelVersion` back) and is not done.
 - **False-accept rate (DR-6 criterion 5)**: `ml/evaluate.py` has no non-signing
   negative set to measure this against yet. `server/gate.py` treats a missing
   measurement as "not measured, does not block" rather than fabricating a
@@ -166,19 +185,30 @@ reverse proxy) and rate-limit `/auth/login` there; neither is done in this proce
   (`server/shadow.py`), against what the champion actually said on the same items,
   and answers 409 until `SIGNOO_SHADOW_MIN_ITEMS` (default 30) exist. What is still
   not built is fleet-wide monitoring of live metrics during a staged rollout.
-- **Kiosk auth**: `/ingest/sessions` and `/fleet/kiosks/{register,heartbeat}` require
-  the shared `X-Kiosk-Token`. That proves a request came from something holding the
-  secret, not *which* kiosk; `SYSTEM_DESIGN.md` §5's per-kiosk mTLS is still the
-  stronger design and is not built (this process does not terminate TLS).
-- **KB sharing with kiosk/**: every KB write also rewrites
-  `kiosk/data/knowledge_base.json` in full (`server/kb.py::sync_kiosk_kb_file`),
-  so kiosk B7 can read it directly — this is the dev-simulation shortcut named
-  in the task; a real deployment syncs this over the network (mTLS,
-  store-and-forward) instead of sharing a file path between two processes.
-- **Rollback (`POST /registry/{version}/rollback`)** marks the model version
-  `rolled_back` but does not itself revert fleet kiosks' `current_model_version`
-  — pair it with a new `POST /fleet/rollouts` targeting the previous champion to
-  actually move traffic back.
+- **Kiosk auth**: every kiosk-facing endpoint (`/ingest/sessions`, `/fleet/kiosks/...`)
+  requires `X-Kiosk-Token`. In `shared` mode that proves a request came from something
+  holding the secret, not *which* kiosk. In `per_kiosk` mode (2026-10-12) the token is
+  HMAC-SHA256(master key, kiosk_id), so it works only for its own kiosk id and a stolen
+  kiosk exposes only itself. It is still a bearer token over TLS, not the per-kiosk mTLS
+  `SYSTEM_DESIGN.md` §5 describes (this process does not terminate TLS); revoking one
+  kiosk means changing the master key or retiring its id.
+- **Consent is enforced on the server too (2026-10-12)**: an upload with
+  `consent_retention: false` is refused 422 and nothing is stored, whatever the client does.
+- **Retention and erasure (2026-10-12)**: unreviewed clips are purged after
+  `SIGNOO_RETENTION_DAYS`; `DELETE /review/sessions/{session_id}` (admin) erases a session's
+  clips now. Neither can remove data from a model that already trained on it.
+- **KB distribution (2026-10-12)**: knowledge-base entries now carry a `language`
+  (default `liu`), are checked against *that language's* vocabulary and clips, and are
+  published per language to the file named in `core/languages.json`. A kiosk that does not
+  share a disk with the server fetches them with `GET /fleet/kiosks/{id}/kb?language=`
+  (ETag; 204 for a language with no entries so a kiosk is never blanked). The file write
+  (`server/kb.py::sync_kiosk_kb_file`) remains for a server and kiosk on one machine.
+- **Rollback (`POST /registry/{version}/rollback`)** marks the version `rolled_back`,
+  marks its rollouts `rolled_back`, and repoints each kiosk's recorded
+  `current_model_version` at what it would now be served (the previous promoted rollout, or
+  nothing). A kiosk that is told it has nothing assigned reverts to its factory checkpoint
+  (`kiosk/model_sync.py`). Rollouts become `completed` when every target reports the version.
+  What is still missing is *automatic* halting of a rollout on bad live metrics.
 - **`/auth/users` is admin-gated**, including for the very first user — creating
   the first admin on a fresh database is `server/seed.py` (a script, not an
   endpoint), since no admin token can exist yet to authorize the first call.
@@ -190,8 +220,10 @@ server/
   main.py            FastAPI app, router wiring, startup
   config.py          Settings resolved once from the environment
   db.py              SQLAlchemy engine/session (Postgres or SQLite)
-  models.py          ORM: User, SessionUpload, ReviewItem, ModelVersion,
-                      KBEntry, Kiosk, Rollout
+  models.py          ORM: User, SessionUpload, ReviewItem, ModelVersion, TrainingLock,
+                      KBEntry, Kiosk, Rollout, RolloutTarget
+  rollouts.py        B15 rollout rules: what a kiosk is served, completion, retirement
+  retention.py       purge of unreviewed clips past SIGNOO_RETENTION_DAYS
   schemas.py          Pydantic shapes matching docs/API_CONTRACTS.md
   auth.py            JWT + role-based least-privilege dependency
   gate.py            B13's 7-criterion promotion gate (pure function)
@@ -202,6 +234,7 @@ server/
   alembic/           migrations (initial schema autogenerated + verified)
   scripts/
     simulate_kiosk.py  stand-in for a physical kiosk (B15)
+    kiosk_token.py     prints one kiosk's credential for per_kiosk mode
   tests/             pytest suite, incl. test_gate.py (see above)
   docker-compose.yml Postgres for local dev
   requirements.txt   pinned, exactly what's installed in server/.venv

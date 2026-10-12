@@ -5,28 +5,51 @@ not rename or reshape fields here without updating that doc first.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+
+FRAME_DIM = 203          # core.features.FRAME_DIM: one landmark row per frame
+
+# Identifiers become directory and file names in the training export
+# (server/training.py), so they are restricted to one safe path component here, at
+# the boundary. The leading alphanumeric rules out "." and "..".
+SAFE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+SAFE_LABEL_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+SafeId = Annotated[str, StringConstraints(pattern=SAFE_ID_PATTERN)]
+SafeLabel = Annotated[str, StringConstraints(pattern=SAFE_LABEL_PATTERN)]
+LanguageCode = Annotated[str, StringConstraints(pattern=r"^[a-z]{2,8}$")]
+
+MAX_ITEMS_PER_UPLOAD = 200
+MAX_FRAMES_PER_ITEM = 256    # the kiosk caps an utterance at 45 frames by default
 
 
 # ── §4 session upload (kiosk B10 -> server B11) ─────────────────────────────────
 
 class SessionItemIn(BaseModel):
-    utterance_id: str
-    landmarks: list[list[float]]
-    predicted_gloss: str
-    confidence: float
-    correction: str | None = None
-    signer_id: str = "unknown"
+    utterance_id: SafeId
+    landmarks: list[list[float]] = Field(min_length=1, max_length=MAX_FRAMES_PER_ITEM)
+    predicted_gloss: SafeLabel
+    confidence: float = Field(ge=0.0, le=1.0)
+    correction: SafeLabel | None = None
+    signer_id: SafeId = "unknown"
+
+    @field_validator("landmarks")
+    @classmethod
+    def _rows_are_frames(cls, rows: list[list[float]]) -> list[list[float]]:
+        if any(len(row) != FRAME_DIM for row in rows):
+            raise ValueError(f"every landmark row must have exactly {FRAME_DIM} values")
+        return rows
 
 
 class SessionUploadIn(BaseModel):
-    session_id: str
-    kiosk_id: str
-    language: str
+    session_id: SafeId
+    kiosk_id: SafeId
+    language: LanguageCode
     consent_retention: bool
-    started_at: str
-    ended_at: str
-    items: list[SessionItemIn]
+    started_at: str = Field(max_length=64)
+    ended_at: str = Field(max_length=64)
+    items: list[SessionItemIn] = Field(max_length=MAX_ITEMS_PER_UPLOAD)
 
 
 class SessionUploadOut(BaseModel):
@@ -59,13 +82,16 @@ class ReviewDecisionIn(BaseModel):
     # confirm: predicted_gloss is correct. correct: validated_label overrides it.
     # flag: send to a linguist, no label recorded yet.
     decision: str = Field(pattern="^(confirm|correct|flag)$")
-    validated_label: str | None = None
-    note: str | None = None
+    validated_label: SafeLabel | None = None
+    note: str | None = Field(default=None, max_length=1000)
 
 
 # ── §3 knowledge base (B14) ──────────────────────────────────────────────────────
 
 class KBEntryIn(BaseModel):
+    # Whose engine this answer belongs to; defaults to the original language so a client
+    # written before per-language knowledge bases keeps working.
+    language: LanguageCode = "liu"
     site_id: str = "default"
     keywords: list[str]
     answer_ar: str
@@ -76,6 +102,7 @@ class KBEntryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    language: str = "liu"
     site_id: str
     keywords: list[str]
     answer_ar: str
@@ -100,6 +127,8 @@ class KioskHeartbeatIn(BaseModel):
     temperature_c: float | None = None
     throttled: bool | None = None
     uptime_s: float | None = None
+    # Language code -> installed model version, one entry per language engine.
+    model_versions: dict[str, str] | None = None
 
 
 class KioskOut(BaseModel):
@@ -114,6 +143,7 @@ class KioskOut(BaseModel):
     throttled: bool
     uptime_s: float | None
     online: bool
+    model_versions: dict[str, str] = {}
 
 
 class RolloutIn(BaseModel):
@@ -145,17 +175,48 @@ class ModelVersionOut(BaseModel):
     checkpoint_path: str | None
 
 
+class TrainingCurvePoint(BaseModel):
+    epoch: int
+    train_loss: float
+    val_accuracy: float
+
+
+class TrainingRunOut(BaseModel):
+    """console/src/api/types.ts `TrainingRun`, plus `language`."""
+
+    run_id: str
+    language: str
+    started_at: str
+    finished_at: str | None
+    status: str
+    candidate_version: str | None
+    champion_version: str | None
+    curves: list[TrainingCurvePoint]
+
+
 class TrainTriggerIn(BaseModel):
     language: str = "liu"
     epochs: int = 40
     champion_version: str | None = None
 
 
+class BenchmarkIn(BaseModel):
+    language: LanguageCode
+    val: list[SafeId] = Field(min_length=1)
+    test: list[SafeId] = Field(min_length=1)
+
+
+class BenchmarkOut(BaseModel):
+    language: str
+    val: list[str]
+    test: list[str]
+
+
 # ── §5 auth ───────────────────────────────────────────────────────────────────────
 
 class LoginIn(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=256)
 
 
 class TokenOut(BaseModel):

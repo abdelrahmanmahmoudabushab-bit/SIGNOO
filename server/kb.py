@@ -28,10 +28,32 @@ def _load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_vocab_index() -> dict[str, str]:
+def language_paths(language: str) -> dict[str, Path]:
+    """The files one language's engine owns, from core/languages.json (the file the kiosk
+    reads). "liu" keeps its configurable paths in `settings`, which is how it always worked
+    and what tests redirect. A language with no entry, or no such part, simply has no path
+    for it: nothing is borrowed from another language."""
+    paths: dict[str, Path] = {}
+    entries = _load_json(settings.languages_path) or []
+    entry = next((e for e in entries if e.get("code") == language), {})
+    for key, setting_name in (("vocab", "vocab_path"), ("knowledge_base", "kiosk_kb_path"),
+                              ("clip_library", "clip_library_path")):
+        if language == "liu":
+            paths[key] = getattr(settings, setting_name)
+        elif entry.get(key):
+            paths[key] = settings.languages_path.parent.parent / entry[key]
+    return paths
+
+
+def kb_path_for(language: str) -> Path | None:
+    return language_paths(language).get("knowledge_base")
+
+
+def load_vocab_index(language: str = "liu") -> dict[str, str]:
     """Maps every whole-phrase `ar`/`en` value, lowercased, plus each id itself, to
-    its vocab id."""
-    vocab = _load_json(settings.vocab_path)
+    its vocab id, for one language's vocabulary."""
+    path = language_paths(language).get("vocab")
+    vocab = _load_json(path) if path else []
     index: dict[str, str] = {}
     for entry in vocab:
         index[entry["ar"].strip().lower()] = entry["id"]
@@ -48,6 +70,7 @@ def unrenderable_words(
     answer_ar: str, answer_en: str, keywords: list[str],
     vocab_index: dict[str, str] | None = None,
     clip_library: dict | None = None,
+    language: str = "liu",
 ) -> list[str]:
     """Vocab ids referenced by this entry whose clip library entry is missing or
     has `clip_path: null`. Right now that is every entry, by design (§API_CONTRACTS
@@ -58,9 +81,9 @@ def unrenderable_words(
     fresh for this one call.
     """
     if vocab_index is None:
-        vocab_index = load_vocab_index()
+        vocab_index = load_vocab_index(language)
     if clip_library is None:
-        clip_library = _load_json(settings.clip_library_path)
+        clip_library = load_clip_library(language)
 
     referenced: set[str] = set()
     haystacks = [answer_ar, answer_en] + list(keywords)
@@ -80,16 +103,20 @@ def unrenderable_words(
     return unrenderable
 
 
-def load_clip_library() -> dict:
-    """Read-only view of `core/clip_library.json` for the console's KB editor preview
+def load_clip_library(language: str = "liu") -> dict:
+    """Read-only view of one language's clip library for the console's KB editor preview
     (FR-W7) — the same file `unrenderable_words` above already reads, exposed as an
     endpoint so the console doesn't need its own copy of the path/parsing logic.
     """
-    return _load_json(settings.clip_library_path)
+    path = language_paths(language).get("clip_library")
+    return _load_json(path) if path else {}
 
 
-def sync_kiosk_kb_file(db_entries: list[dict]) -> None:
-    """Writes the same content kiosk/'s B7 reads, at `kiosk/data/knowledge_base.json`.
+def sync_kiosk_kb_file(db_entries: list[dict], language: str = "liu") -> None:
+    """Writes the same content kiosk/'s B7 reads for one language: `kiosk/data/knowledge_base.json`
+    for "liu", the language's own file (core/languages.json) for the others. A language with
+    no knowledge-base file listed has nowhere to be written, and the kiosk then refuses its
+    questions: that is raised, not silently dropped, so an editor is told.
 
     File-based sharing for this dev-simulation phase only — a real deployment syncs
     this over the network (mTLS, store-and-forward) instead of a shared file path.
@@ -99,7 +126,9 @@ def sync_kiosk_kb_file(db_entries: list[dict]) -> None:
     `os.replace` (atomic on both POSIX and Windows), so kiosk B7 reading this file
     concurrently with a write never observes a partially written document.
     """
-    path = settings.kiosk_kb_path
+    path = kb_path_for(language)
+    if path is None:
+        raise ValueError(f"language '{language}' has no knowledge_base file in core/languages.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:

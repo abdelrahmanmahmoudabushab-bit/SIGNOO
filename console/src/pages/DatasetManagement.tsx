@@ -1,12 +1,20 @@
 import { useEffect, useState } from "react";
 import { fetchCoverage, fetchDatasetSessions, retireSession } from "../api/endpoints";
 import type { DatasetSession, SignCoverage } from "../api/types";
+import { useAuth } from "../auth/AuthContext";
+import { can } from "../auth/permissions";
 import { SourceTag } from "../components/SourceTag";
+import { WriteStatus } from "../components/WriteStatus";
+import { useWrite } from "../hooks/useWrite";
 
 export function DatasetManagement() {
   const [coverage, setCoverage] = useState<SignCoverage[] | null>(null);
   const [sessions, setSessions] = useState<DatasetSession[] | null>(null);
-  const [source, setSource] = useState<"server" | "mock" | null>(null);
+  const [coverageSource, setCoverageSource] = useState<"server" | "mock" | null>(null);
+  const [sessionsSource, setSessionsSource] = useState<"server" | "mock" | null>(null);
+  const { user } = useAuth();
+  const canManage = can(user?.role, "dataset:manage");
+  const write = useWrite();
 
   useEffect(() => {
     let cancelled = false;
@@ -14,24 +22,28 @@ export function DatasetManagement() {
       if (cancelled) return;
       setCoverage(cov.data);
       setSessions(sess.data);
-      setSource(cov.source === "server" && sess.source === "server" ? "server" : "mock");
+      setCoverageSource(cov.source);
+      setSessionsSource(sess.source);
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  async function onRetire(sessionId: string) {
-    await retireSession(sessionId);
-    setSessions((prev) => prev?.map((s) => (s.session_id === sessionId ? { ...s, status: "retired" } : s)) ?? null);
-  }
+  // A refused retire shows the server's reason and the session stays "active".
+  const onRetire = (sessionId: string) =>
+    write.run(sessionId, () => retireSession(sessionId), () =>
+      setSessions((prev) => prev?.map((s) => (s.session_id === sessionId ? { ...s, status: "retired" } : s)) ?? null)
+    );
 
   return (
     <section>
       <header className="view-header">
         <h1>Dataset management (FR-W4)</h1>
-        <SourceTag source={source} />
+        <SourceTag source={coverageSource} label="coverage" />
+        <SourceTag source={sessionsSource} label="sessions" />
       </header>
+      <WriteStatus write={write} />
 
       <h2>Coverage by sign</h2>
       {!coverage && <p>Loading…</p>}
@@ -92,7 +104,11 @@ export function DatasetManagement() {
                 <td>{s.clip_count}</td>
                 <td>{s.status}</td>
                 <td>
-                  {s.status === "active" && <button onClick={() => onRetire(s.session_id)}>Retire</button>}
+                  {canManage && s.status === "active" && (
+                    <button disabled={write.busy === s.session_id} onClick={() => onRetire(s.session_id)}>
+                      Retire
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

@@ -6,13 +6,13 @@ Landmarks by default, never video (NFR-S2) — the items list here is exactly wh
 NFR-S6 needs to locate and delete on request: one file per session, named by
 `session_id`.
 
-Nothing here POSTs to `server/`; the plan explicitly scopes that out of Phase 2
-("you don't need server/ to exist or be running to build this"). See kiosk/README.md
-for the note on wiring a real upload later.
+`flush_pending_uploads` delivers the queue to `server/` when an operator has set
+`SIGNOO_SERVER_URL`; otherwise nothing leaves the device.
 """
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -89,17 +89,25 @@ def write_pending_upload(capture: SessionCapture, pending_dir: Path) -> Path | N
 
 
 def flush_pending_uploads(pending_dir: Path, server_url: str, timeout_s: float = 5.0,
-                          token: str = "") -> int:
+                          token: str = "", rejected_dir: Path | None = None) -> int:
     """Store-and-forward B10 -> B11: POSTs each queued session file to the server's
-    `/ingest/sessions` and deletes it only after the server answers 2xx. Anything
-    that fails (offline, server down, rejected) stays on disk and is retried on the
-    next call, so the kiosk never loses a consented session or blocks on the network.
+    `/ingest/sessions` and deletes it only after the server answers 2xx. Offline, a
+    server error (5xx), or a refusal that is not about the file (401/403 wrong token,
+    408/429 try later) leaves it queued for the next call, so the kiosk never loses a
+    consented session or blocks on the network.
+
+    Any other 4xx means the server will never take this file as it is. Retrying it on
+    every flush forever helps nobody, so it is moved to `rejected_dir` (default: a
+    `rejected_uploads` folder beside the queue), still one file per session id so
+    NFR-S6 deletion can find it.
 
     Returns how many files were delivered. A blank `server_url` disables upload and
     leaves the queue untouched; nothing leaves the device unless an operator opts in.
     """
     if not server_url or not pending_dir.exists():
         return 0
+    if rejected_dir is None:
+        rejected_dir = pending_dir.parent / "rejected_uploads"
 
     import logging
     import urllib.error
@@ -121,9 +129,15 @@ def flush_pending_uploads(pending_dir: Path, server_url: str, timeout_s: float =
                     path.unlink()
                     delivered += 1
         except urllib.error.HTTPError as exc:
-            # The server answered and refused this file; keep it for inspection but
-            # don't let one bad file block every session queued behind it.
+            if exc.code >= 500 or exc.code in (401, 403, 408, 429):
+                logger.warning("upload_deferred", extra={"file": path.name, "status": exc.code})
+                continue
             logger.warning("upload_rejected", extra={"file": path.name, "status": exc.code})
+            try:
+                rejected_dir.mkdir(parents=True, exist_ok=True)
+                os.replace(path, rejected_dir / path.name)
+            except OSError as move_exc:   # stays queued; better retried than lost
+                logger.warning("upload_reject_move_failed", extra={"file": path.name, "reason": str(move_exc)})
         except (urllib.error.URLError, OSError, ValueError) as exc:
             logger.info("upload_deferred", extra={"file": path.name, "reason": str(exc)})
             break    # server unreachable: later files would fail the same way

@@ -2,7 +2,9 @@
 // it is the single integration point shared with server/ (built by a different agent against
 // the same shapes).
 
-export type Language = "liu" | "esl" | "asl";
+// A sign-language code ("liu", "asl", ...). The server types it as a plain string and the set
+// of languages is data (see endpoints.ts::fetchLanguages), so no codes are listed here.
+export type Language = string;
 
 export type Role = "operator" | "reviewer" | "engineer" | "admin";
 
@@ -55,6 +57,7 @@ export type GateCriterionVerdict = "pass" | "fail";
 
 export interface ModelRegistryEntry {
   version: string;
+  language: Language; // server/schemas.py ModelVersionOut.language: each language has its own models
   code_commit: string;
   data_snapshot: string;
   metrics: {
@@ -92,6 +95,7 @@ export interface KioskSummary {
   language: Language;
   health: KioskHealth;
   model_version: string;
+  model_versions: Record<Language, string>; // installed model per language engine, as last reported
   uptime_seconds: number;
   temperature_c: number | null; // null = "unavailable" (non-Jetson dev box), never a faked number
   last_contact: string;
@@ -112,6 +116,7 @@ export interface ServerKioskOut {
   throttled: boolean;
   uptime_s: number | null;
   online: boolean;
+  model_versions?: Record<Language, string>;
 }
 
 // The real server/routers/auth.py `TokenOut` wire shape — no `user` object, since the server
@@ -206,6 +211,7 @@ export interface DatasetSession {
 // --- Training visibility (FR-W5) -------------------------------------------------------------
 export interface TrainingRun {
   run_id: string;
+  language: Language; // server/schemas.py TrainingRunOut.language
   started_at: string;
   finished_at: string | null;
   status: "running" | "completed" | "failed";

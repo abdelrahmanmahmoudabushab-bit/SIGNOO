@@ -157,6 +157,36 @@ class HolisticPerception:
             self._landmarker.close()
 
 
+def jpeg_size(data: bytes) -> tuple[int, int] | None:
+    """(width, height) from a JPEG's frame header, without decoding the image; None if
+    this is not a JPEG. Lets the caller refuse an oversized image before any pixel
+    buffer is allocated for it.
+    """
+    if data[:2] != b"\xff\xd8":
+        return None
+    i = 2
+    while i + 4 <= len(data):
+        if data[i] != 0xFF:
+            return None
+        marker = data[i + 1]
+        if marker == 0xFF:                              # fill byte before a marker
+            i += 1
+        elif marker == 0x01 or 0xD0 <= marker <= 0xD8:  # markers with no payload
+            i += 2
+        elif marker in (0xD9, 0xDA):                    # image data with no frame header before it
+            return None
+        else:
+            length = int.from_bytes(data[i + 2:i + 4], "big")
+            if length < 2:
+                return None
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):   # a start-of-frame
+                if i + 9 > len(data):
+                    return None
+                return int.from_bytes(data[i + 7:i + 9], "big"), int.from_bytes(data[i + 5:i + 7], "big")
+            i += 2 + length
+    return None
+
+
 def decode_base64_frame(data_url_or_b64: str) -> bytes:
     """Accepts either a bare base64 string or a `data:image/jpeg;base64,...` URL,
     since browsers commonly hand a canvas/video frame over as the latter.

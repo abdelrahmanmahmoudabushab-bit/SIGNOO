@@ -11,11 +11,16 @@ from server.schemas import CreateUserIn, LoginIn, TokenOut, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Verified against when the email is unknown, so a miss costs the same bcrypt work as
+# a wrong password and response time does not reveal which emails have accounts.
+_DUMMY_HASH = hash_password("no-such-user")
+
 
 @router.post("/login", response_model=TokenOut)
 def login(payload: LoginIn, db: Session = Depends(get_db)) -> TokenOut:
     user = db.query(User).filter(User.email == payload.email).one_or_none()
-    if user is None or not verify_password(payload.password, user.hashed_password):
+    password_ok = verify_password(payload.password, user.hashed_password if user else _DUMMY_HASH)
+    if user is None or not password_ok:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="bad credentials")
     token = create_access_token(subject=user.id, role=user.role)
     return TokenOut(access_token=token, role=user.role)

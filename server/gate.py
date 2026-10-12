@@ -52,6 +52,32 @@ def _other_metric_improves(candidate: dict, champion: dict) -> bool:
     return False
 
 
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _no_regression(champion_scores: dict | None, candidate_scores: dict | None,
+                   kind: str, limit: float) -> tuple[bool, str]:
+    """DR-6 #2/#3. Every signer/sign the champion was scored on must also be scored
+    for the candidate: one that is absent was not measured, and an unmeasured
+    regression must fail the gate rather than be skipped."""
+    champion_scores = champion_scores or {}
+    candidate_scores = candidate_scores or {}
+    if not champion_scores:
+        return False, f"champion has no per_{kind} metrics, so regressions cannot be ruled out"
+    missing = sorted(k for k in champion_scores if not _is_number(candidate_scores.get(k)))
+    if missing:
+        return False, f"candidate has no score for {kind}(s) the champion was measured on: {', '.join(missing)}"
+    worst, worst_drop = None, 0.0
+    for key, champ_acc in champion_scores.items():
+        drop = champ_acc - candidate_scores[key]
+        if drop > worst_drop:
+            worst, worst_drop = key, drop
+    if worst_drop <= limit:
+        return True, f"no {kind} regressed"
+    return False, f"{kind} {worst} regressed {worst_drop:.1%} (limit {limit:.1%})"
+
+
 def evaluate_gate(
     candidate: dict,
     champion: dict | None,
@@ -67,13 +93,21 @@ def evaluate_gate(
     criteria: dict[str, bool] = {}
     details: dict[str, str] = {}
 
-    cand_top1 = candidate.get("top1", 0.0)
-    champ_top1 = champion.get("top1", 0.0) if champion else 0.0
+    cand_top1 = candidate.get("top1")
+    champ_top1 = champion.get("top1") if champion else None
 
     # 1. Top-1 improves, or ties within tolerance while something else improves.
-    if champion is None:
+    # A missing top1 on either side is a comparison nobody made: it fails, it never
+    # defaults to 0 (which would let any candidate "beat" a champion with no number).
+    if not _is_number(cand_top1):
+        criteria["top1_improves_or_ties"] = False
+        details["top1_improves_or_ties"] = "candidate has no top1 metric"
+    elif champion is None:
         criteria["top1_improves_or_ties"] = True
         details["top1_improves_or_ties"] = "no champion yet — nothing to compare against"
+    elif not _is_number(champ_top1):
+        criteria["top1_improves_or_ties"] = False
+        details["top1_improves_or_ties"] = "champion has no top1 metric, so the candidate cannot be compared with it"
     elif cand_top1 >= champ_top1:
         criteria["top1_improves_or_ties"] = True
         details["top1_improves_or_ties"] = f"candidate {cand_top1:.1%} >= champion {champ_top1:.1%}"
@@ -96,42 +130,20 @@ def evaluate_gate(
         criteria["no_signer_regression"] = True
         details["no_signer_regression"] = "no champion yet"
     else:
-        worst_signer, worst_drop = None, 0.0
-        for signer, champ_acc in (champion.get("per_signer") or {}).items():
-            cand_acc = (candidate.get("per_signer") or {}).get(signer)
-            if cand_acc is None:
-                continue
-            drop = champ_acc - cand_acc
-            if drop > worst_drop:
-                worst_signer, worst_drop = signer, drop
-        ok = worst_drop <= SIGNER_REGRESSION_LIMIT
+        ok, detail = _no_regression(
+            champion.get("per_signer"), candidate.get("per_signer"), "signer", SIGNER_REGRESSION_LIMIT)
         criteria["no_signer_regression"] = ok
-        details["no_signer_regression"] = (
-            "no signer regressed" if worst_signer is None or ok
-            else f"signer {worst_signer} regressed {worst_drop:.1%} "
-                 f"(limit {SIGNER_REGRESSION_LIMIT:.1%})"
-        )
+        details["no_signer_regression"] = detail
 
     # 3. No sign regresses by more than 5 points (NFR-Q5).
     if champion is None:
         criteria["no_sign_regression"] = True
         details["no_sign_regression"] = "no champion yet"
     else:
-        worst_sign, worst_drop = None, 0.0
-        for sign, champ_acc in (champion.get("per_sign") or {}).items():
-            cand_acc = (candidate.get("per_sign") or {}).get(sign)
-            if cand_acc is None:
-                continue
-            drop = champ_acc - cand_acc
-            if drop > worst_drop:
-                worst_sign, worst_drop = sign, drop
-        ok = worst_drop <= SIGN_REGRESSION_LIMIT
+        ok, detail = _no_regression(
+            champion.get("per_sign"), candidate.get("per_sign"), "sign", SIGN_REGRESSION_LIMIT)
         criteria["no_sign_regression"] = ok
-        details["no_sign_regression"] = (
-            "no sign regressed" if worst_sign is None or ok
-            else f"sign {worst_sign} regressed {worst_drop:.1%} "
-                 f"(limit {SIGN_REGRESSION_LIMIT:.1%})"
-        )
+        details["no_sign_regression"] = detail
 
     # 4. No class falls to zero recall.
     cand_per_sign = candidate.get("per_sign")

@@ -9,6 +9,7 @@ from pathlib import Path
 # Must be set before server.config is first imported: tests drive the scheduler
 # directly and must never have a background training loop running behind them.
 os.environ["SIGNOO_AUTO_TRAIN"] = "0"
+os.environ["SIGNOO_RETENTION_DAYS"] = "0"   # the purge shares the scheduler loop; tests call it directly
 os.environ["SIGNOO_ENV"] = "dev"           # production refuses the dev secret and a blank kiosk token
 
 import pytest

@@ -71,16 +71,35 @@ def test_unreachable_server_keeps_the_session_queued(tmp_path):
     assert len(list(tmp_path.glob("*.json"))) == 1
 
 
-def test_rejected_session_is_kept_and_does_not_block_the_next(tmp_path):
-    write_pending_upload(_capture("aaaaaaaa-0000-0000-0000-000000000000"), tmp_path)
-    write_pending_upload(_capture("bbbbbbbb-0000-0000-0000-000000000000"), tmp_path)
+def test_rejected_session_moves_aside_and_does_not_block_the_next(tmp_path):
+    """A 4xx the server will never reconsider leaves the queue, but is kept (one file per
+    session id, so NFR-S6 deletion can still find it) instead of being retried forever."""
+    pending = tmp_path / "pending"
+    write_pending_upload(_capture("aaaaaaaa-0000-0000-0000-000000000000"), pending)
+    write_pending_upload(_capture("bbbbbbbb-0000-0000-0000-000000000000"), pending)
     server = _Server(422)
     try:
-        assert flush_pending_uploads(tmp_path, server.url) == 0
+        assert flush_pending_uploads(pending, server.url) == 0
     finally:
         server.close()
     assert len(server.bodies) == 2           # both were attempted
-    assert len(list(tmp_path.glob("*.json"))) == 2
+    assert list(pending.glob("*.json")) == []
+    kept = sorted(p.name for p in (tmp_path / "rejected_uploads").glob("*.json"))
+    assert kept == ["aaaaaaaa-0000-0000-0000-000000000000.json", "bbbbbbbb-0000-0000-0000-000000000000.json"]
+
+
+def test_server_error_keeps_the_session_queued_for_retry(tmp_path):
+    """5xx and 'try later' refusals (token, rate limit) say nothing about the file."""
+    for status in (500, 401, 429):
+        pending = tmp_path / str(status)
+        write_pending_upload(_capture(), pending)
+        server = _Server(status)
+        try:
+            assert flush_pending_uploads(pending, server.url) == 0
+        finally:
+            server.close()
+        assert len(list(pending.glob("*.json"))) == 1
+        assert not (tmp_path / "rejected_uploads").exists()
 
 
 def test_blank_server_url_sends_nothing(tmp_path):

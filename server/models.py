@@ -43,7 +43,9 @@ class SessionUpload(Base):
     __tablename__ = "session_uploads"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
-    session_id: Mapped[str] = mapped_column(String, index=True)
+    # Unique: a kiosk re-sends a session whose acknowledgement it never received, and
+    # a second copy would put the same clips in the queue (and in training) twice.
+    session_id: Mapped[str] = mapped_column(String, unique=True, index=True)
     kiosk_id: Mapped[str] = mapped_column(String, index=True)
     language: Mapped[str] = mapped_column(String)
     consent_retention: Mapped[bool] = mapped_column(Boolean)
@@ -106,6 +108,40 @@ class ModelVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     shadow_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     promoted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Set only by server/training.py: when the run began, and the same-language
+    # champion its gate was judged against (null = there was none yet).
+    training_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    champion_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Hashed once when training finishes so serving a download never re-reads the file
+    # just to hash it. Null on rows that predate the column; the endpoint then hashes.
+    checkpoint_sha256: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class TrainingLock(Base):
+    """One row per language while a training run is in progress.
+
+    The scheduler (in every server worker) and `POST /training/trigger` all start runs
+    through `server/training.py::train_candidate`. Without this, two of them could train
+    the same language at once and write two candidates gated against the same champion.
+    A row older than the configured lease is treated as left behind by a crashed process.
+    """
+
+    __tablename__ = "training_locks"
+
+    language: Mapped[str] = mapped_column(String, primary_key=True)
+    holder: Mapped[str] = mapped_column(String)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class TrainingAttempt(Base):
+    """The last automatic training run that crashed, per language. A crash leaves no
+    ModelVersion, so without this the scheduler would retry it on every poll."""
+
+    __tablename__ = "training_attempts"
+
+    language: Mapped[str] = mapped_column(String, primary_key=True)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime)
+    error: Mapped[str] = mapped_column(String)
 
 
 # ── B14: knowledge base ──────────────────────────────────────────────────────────
@@ -116,6 +152,9 @@ class KBEntry(Base):
     __tablename__ = "kb_entries"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    # Each language has its own knowledge base (SYSTEM_DESIGN.md §1.1b): an answer is
+    # written in, and retrieved for, one language's engine only.
+    language: Mapped[str] = mapped_column(String, default="liu", index=True)
     site_id: Mapped[str] = mapped_column(String, default="default", index=True)
     keywords: Mapped[list] = mapped_column(JSON, default=list)
     answer_ar: Mapped[str] = mapped_column(String)
@@ -137,6 +176,8 @@ class Kiosk(Base):
     temperature_c: Mapped[float | None] = mapped_column(Float, nullable=True)
     throttled: Mapped[bool] = mapped_column(Boolean, default=False)
     uptime_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Language code -> version the kiosk reports installed for that language's engine.
+    model_versions: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class Rollout(Base):
@@ -146,7 +187,28 @@ class Rollout(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     model_version: Mapped[str] = mapped_column(ForeignKey("model_versions.version"))
-    target_kiosk_ids: Mapped[list] = mapped_column(JSON, default=list)
-    # pending | active | rolled_back | completed
+    # pending | active | rolled_back | completed. `completed` is set by the server once
+    # every targeted kiosk reports running the version (routers/fleet.py).
     status: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    targets: Mapped[list["RolloutTarget"]] = relationship(
+        cascade="all, delete-orphan", lazy="selectin", order_by="RolloutTarget.kiosk_id")
+
+    @property
+    def target_kiosk_ids(self) -> list[str]:
+        return [t.kiosk_id for t in self.targets]
+
+    @target_kiosk_ids.setter
+    def target_kiosk_ids(self, kiosk_ids: list[str]) -> None:
+        self.targets = [RolloutTarget(kiosk_id=k) for k in dict.fromkeys(kiosk_ids)]
+
+
+class RolloutTarget(Base):
+    """Which kiosks a rollout targets. A table, not a JSON list, so "does this rollout
+    target this kiosk" is an indexed lookup instead of a scan of every rollout."""
+
+    __tablename__ = "rollout_targets"
+
+    rollout_id: Mapped[str] = mapped_column(ForeignKey("rollouts.id"), primary_key=True)
+    kiosk_id: Mapped[str] = mapped_column(String, primary_key=True, index=True)

@@ -44,6 +44,7 @@ export const mockKiosks: KioskSummary[] = [
     language: "liu",
     health: "online",
     model_version: "2026-09-01T00:00:00Z-a1b2c3d",
+    model_versions: { liu: "2026-09-01T00:00:00Z-a1b2c3d" },
     uptime_seconds: 1234567,
     temperature_c: null,
     last_contact: "2026-09-04T09:58:00Z",
@@ -54,6 +55,7 @@ export const mockKiosks: KioskSummary[] = [
     language: "liu",
     health: "degraded",
     model_version: "2026-08-29T00:00:00Z-9f8e7d6",
+    model_versions: { liu: "2026-08-29T00:00:00Z-9f8e7d6" },
     uptime_seconds: 45210,
     temperature_c: null,
     last_contact: "2026-09-04T08:40:00Z",
@@ -64,6 +66,7 @@ export const mockKiosks: KioskSummary[] = [
     language: "esl",
     health: "offline",
     model_version: "2026-08-20T00:00:00Z-1234abc",
+    model_versions: { esl: "2026-08-20T00:00:00Z-1234abc" },
     uptime_seconds: 0,
     temperature_c: null,
     last_contact: "2026-09-03T14:02:00Z",
@@ -125,6 +128,20 @@ export const mockReviewQueue: ReviewQueueItem[] = [
     captured_at: "2026-09-04T08:10:00Z",
     priority_reason: "under_represented_sign",
   },
+  // A second language, so the review workspace can be seen keeping the two queues apart.
+  {
+    queue_id: "q-004",
+    session_id: "sess-004",
+    utterance_id: "utt-004",
+    kiosk_id: "kiosk-dev-01",
+    language: "asl",
+    predicted_gloss: "thank_you",
+    confidence: 0.48,
+    correction: null,
+    signer_id: "signer-21",
+    captured_at: "2026-09-04T08:15:00Z",
+    priority_reason: "low_confidence",
+  },
 ];
 
 export const mockCoverage: SignCoverage[] = mockVocab.map((v, i) => ({
@@ -145,6 +162,7 @@ export const mockDatasetSessions: DatasetSession[] = [
 export const mockTrainingRuns: TrainingRun[] = [
   {
     run_id: "run-002",
+    language: "liu",
     started_at: "2026-09-04T02:00:00Z",
     finished_at: "2026-09-04T03:10:00Z",
     status: "completed",
@@ -158,6 +176,7 @@ export const mockTrainingRuns: TrainingRun[] = [
   },
   {
     run_id: "run-001",
+    language: "liu",
     started_at: "2026-09-01T02:00:00Z",
     finished_at: "2026-09-01T03:05:00Z",
     status: "completed",
@@ -174,6 +193,7 @@ export const mockTrainingRuns: TrainingRun[] = [
 export const mockRegistry: ModelRegistryEntry[] = [
   {
     version: "2026-09-01T00:00:00Z-a1b2c3d",
+    language: "liu",
     code_commit: "a1b2c3d",
     data_snapshot: "manifest-sha256:aaaa",
     metrics: { top1: 0.6, top5: 0.85, per_signer: { "signer-01": 0.55 }, per_sign: { marhaba: 0.7 } },
@@ -193,6 +213,7 @@ export const mockRegistry: ModelRegistryEntry[] = [
   },
   {
     version: "2026-09-04T03:10:00Z-cand02",
+    language: "liu",
     code_commit: "cand02",
     data_snapshot: "manifest-sha256:bbbb",
     metrics: { top1: 0.58, top5: 0.83, per_signer: { "signer-01": 0.4 }, per_sign: { marhaba: 0.62 } },
@@ -209,6 +230,27 @@ export const mockRegistry: ModelRegistryEntry[] = [
       },
     },
     status: "rejected",
+  },
+  // A second language with its own champion, so the registry can be seen keeping them apart.
+  {
+    version: "2026-09-02T00:00:00Z-asl0001",
+    language: "asl",
+    code_commit: "asl0001",
+    data_snapshot: "manifest-sha256:cccc",
+    metrics: { top1: 0.71, top5: 0.9, per_signer: { "signer-21": 0.68 }, per_sign: { thank_you: 0.74 } },
+    gate: {
+      passed: true,
+      criteria: {
+        top1_improves_or_flat: "pass",
+        no_signer_regression: "pass",
+        no_sign_regression: "pass",
+        no_zero_recall_class: "pass",
+        false_accept_rate: "pass",
+        latency_budget: "pass",
+        shadow_run_clean: "pass",
+      },
+    },
+    status: "promoted",
   },
 ];
 

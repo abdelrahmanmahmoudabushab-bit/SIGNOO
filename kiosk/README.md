@@ -160,6 +160,23 @@ a boundary" rule at the process boundary too, not just between Python modules.
   heartbeat every `SIGNOO_HEARTBEAT_INTERVAL_S` (30 s) with uptime and, where the board
   reports it, the hottest thermal-zone temperature (`kiosk/fleet.py`). Set
   `SIGNOO_KIOSK_TOKEN` to the server's token; a production server refuses requests without it.
+  A server in `per_kiosk` mode wants this kiosk's own token, not the master key: get it with
+  `python -m server.scripts.kiosk_token <your SIGNOO_KIOSK_ID>` on the server.
+  **From 2026-10-12 each heartbeat tick also asks the server for two things per language:**
+  the assigned model (`kiosk/model_sync.py`) and the knowledge base (`kiosk/kb_sync.py`).
+  A model the server later withdraws (a rollback) makes the kiosk **revert to the checkpoint
+  it shipped with** — the only model it can fall back to offline. Synced knowledge bases are
+  written under `SIGNOO_SYNCED_MODELS_DIR/kb/<code>.json` (never over the source-controlled
+  seed in `kiosk/data/`), survive a restart, and a download that does not parse leaves the
+  working one untouched.
+- **A language trained only on generated data is not offered.** `core/languages.json` marks
+  each language `real_data` true or false; a false one is refused (`language_unavailable`,
+  card shows "coming soon") unless `SIGNOO_ALLOW_SYNTHETIC=1`. That is currently the case for
+  `liu`, so **a development machine or demo must set `SIGNOO_ALLOW_SYNTHETIC=1` to see it** —
+  the kiosk test suite does this itself (`kiosk/tests/conftest.py`). A deployment must not.
+- **One browser connection at a time.** A new `/ws/session` connection replaces the old one
+  (closed with code 4001) so a reloaded page or stray tab cannot leave a second MediaPipe
+  instance running on the Jetson.
 
 ## Frontend
 

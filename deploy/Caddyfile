@@ -1,0 +1,30 @@
+# Caddy gets and renews the HTTPS certificate for SIGNOO_DOMAIN by itself (Let's Encrypt),
+# provided the domain's DNS A record points at this droplet and ports 80 and 443 are open.
+{$SIGNOO_DOMAIN} {
+	encode zstd gzip
+
+	# The interactive API docs describe every endpoint to anyone who asks. Not on the internet.
+	@docs path /api/docs /api/docs/* /api/redoc /api/openapi.json
+	respond @docs 404
+
+	# /api/* -> the FastAPI container, with the /api prefix removed (the server's routes
+	# have none). Kiosks use the same path: SIGNOO_SERVER_URL=https://<domain>/api
+	handle_path /api/* {
+		reverse_proxy api:8001
+	}
+
+	# Everything else is the console. Unknown paths fall back to index.html so a reload on a
+	# client-side route (e.g. /fleet) works.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		-Server
+	}
+}

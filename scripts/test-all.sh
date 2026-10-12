@@ -17,6 +17,7 @@ run() {
 }
 
 run "kiosk"   .venv/Scripts/python.exe -m pytest kiosk/tests -q
+run "ml"      .venv/Scripts/python.exe -m pytest ml/tests -q
 if [ "$1" = "fast" ]; then
   run "server (fast, no training tests)" server/.venv/Scripts/python.exe -m pytest server/tests -q --ignore=server/tests/test_gate.py
 else

@@ -77,6 +77,9 @@ class Segmenter:
     motion_threshold: float
     hands_absent_ms: int
     min_frames: int
+    # Hands that never pause would otherwise buffer frames for as long as they move.
+    # At this many frames the word is closed and emitted as it stands.
+    max_frames: int = 45
 
     state: SegmentState = SegmentState.IDLE
     _buffer: list[Landmarks] = field(default_factory=list)
@@ -110,6 +113,9 @@ class Segmenter:
 
         # ACTIVE (or just-emitted BOUNDARY, which behaves like ACTIVE going forward)
         if not hands:
+            # A pause is timed over frames that show a still hand. Carried across a gap,
+            # the old start time would close the word the instant the hands came back.
+            self._still_since_ms = None
             self._hands_absent_since_ms = (
                 landmarks.ts_ms if self._hands_absent_since_ms is None else self._hands_absent_since_ms
             )
@@ -145,11 +151,12 @@ class Segmenter:
         else:
             self._still_since_ms = None
 
-        if (
+        paused = (
             self._still_since_ms is not None
             and landmarks.ts_ms - self._still_since_ms >= self.pause_ms
             and len(self._buffer) >= self.min_frames
-        ):
+        )
+        if paused or len(self._buffer) >= self.max_frames:
             self.state = SegmentState.BOUNDARY
             utterance = self._close()
             # Ready for the next word once the hands move again; ACTIVE semantics resume.

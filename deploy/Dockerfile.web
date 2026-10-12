@@ -1,0 +1,19 @@
+# The console (React) built into static files and served by Caddy, which also terminates
+# HTTPS and forwards /api/* to the API container. One image, one domain, so the browser
+# never makes a cross-origin call and the API needs no CORS setting.
+#
+# Build from the repo root; deploy/docker-compose.yml does this.
+FROM node:20-alpine AS build
+WORKDIR /console
+COPY console/package.json console/package-lock.json ./
+RUN npm ci
+COPY console/ ./
+# "/api" is relative on purpose: the same build works on any domain. Mocks are forced OFF so
+# that an unreachable server shows as an error, not as plausible seeded numbers.
+ENV VITE_API_BASE_URL=/api \
+    VITE_USE_MOCKS=0
+RUN npm run build
+
+FROM caddy:2-alpine
+COPY --from=build /console/dist /srv
+COPY deploy/Caddyfile /etc/caddy/Caddyfile

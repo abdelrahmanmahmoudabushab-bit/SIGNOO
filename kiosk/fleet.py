@@ -22,7 +22,9 @@ logger = logging.getLogger("signoo.kiosk.fleet")
 
 class FleetReporter:
     def __init__(self, server_url: str, kiosk_id: str, token: str = "", site_id: str = "default",
-                 language: str = "liu", timeout_s: float = 5.0):
+                 language: str = "liu", timeout_s: float = 5.0, model_versions=None):
+        """`model_versions`: a callable returning {language code: installed model version}."""
+        self.model_versions = model_versions
         self.base = server_url.rstrip("/")
         self.kiosk_id = kiosk_id
         self.token = token
@@ -58,6 +60,9 @@ class FleetReporter:
         temperature = read_temperature_c()
         if temperature is not None:
             beat["temperature_c"] = temperature
+        versions = self.model_versions() if self.model_versions is not None else {}
+        if versions:
+            beat["model_versions"] = versions
         delivered = self._post(f"/fleet/kiosks/{self.kiosk_id}/heartbeat", beat)
         if not delivered:
             self.registered = False       # server may have lost us (new database); re-register next tick

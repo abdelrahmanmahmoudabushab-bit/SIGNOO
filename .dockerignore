@@ -1,0 +1,20 @@
+# The build context is the repo root (deploy/docker-compose.yml). Keep out everything an image
+# must not carry: secrets, local databases, datasets, model files and other people's venvs.
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+**/.venv
+**/node_modules
+console/dist
+.env
+**/.env
+deploy/.env
+server/*.db
+server/runs
+data
+models
+kiosk/data/pending_uploads
+electron
+docs
+*.log

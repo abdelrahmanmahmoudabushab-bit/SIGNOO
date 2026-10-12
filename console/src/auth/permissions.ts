@@ -12,6 +12,7 @@ export type Permission =
   | "dataset:view"
   | "dataset:manage"
   | "training:view"
+  | "training:trigger"
   | "registry:view"
   | "registry:promote"
   | "kb:view"
@@ -27,6 +28,7 @@ const MATRIX: Record<Permission, Role[]> = {
   "dataset:view": ["reviewer", "engineer", "admin"],
   "dataset:manage": ["engineer", "admin"],
   "training:view": ["engineer", "admin"],
+  "training:trigger": ["engineer", "admin"], // server/routers/training.py TRIGGER_ROLES
   "registry:view": ["engineer", "admin"],
   "registry:promote": ["engineer", "admin"],
   "kb:view": ["reviewer", "engineer", "admin"],

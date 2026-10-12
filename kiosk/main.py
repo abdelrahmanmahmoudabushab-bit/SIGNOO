@@ -53,7 +53,8 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.contracts import Hypothesis
@@ -65,8 +66,10 @@ from kiosk.data_capture import (
 from kiosk.dialogue import Dialogue
 from kiosk.fleet import FleetReporter
 from kiosk.output import TTSEngine
-from kiosk.perception import HolisticPerception, PerceptionUnavailable, decode_base64_frame
+from kiosk.perception import HolisticPerception, PerceptionUnavailable, decode_base64_frame, jpeg_size
 from kiosk.languages import LanguageRegistry
+from kiosk.kb_sync import KnowledgeSync
+from kiosk.model_sync import ModelSync, read_installed
 from kiosk.segmentation import Segmenter
 from kiosk.session import Session, SessionState, configure_logging, telemetry_snapshot
 import json
@@ -75,9 +78,18 @@ configure_logging()
 logger = logging.getLogger("signoo.kiosk.main")
 
 async def _heartbeat_loop() -> None:
-    reporter = FleetReporter(CONFIG.server_url, CONFIG.kiosk_id, CONFIG.kiosk_token)
+    reporter = FleetReporter(CONFIG.server_url, CONFIG.kiosk_id, CONFIG.kiosk_token,
+                             model_versions=registry.model_versions)
+    sync = ModelSync(CONFIG.server_url, CONFIG.kiosk_id, registry, CONFIG.synced_models_dir,
+                     CONFIG.kiosk_token)
+    kb_sync = KnowledgeSync(CONFIG.server_url, CONFIG.kiosk_id, registry, CONFIG.synced_kb_dir,
+                            CONFIG.kiosk_token)
     while True:
-        await asyncio.to_thread(reporter.tick)      # blocking HTTP, kept off the event loop
+        # Blocking HTTP (and a new model's load), kept off the event loop. Models and
+        # knowledge bases are only asked for once the server has heard from us this tick.
+        if await asyncio.to_thread(reporter.tick):
+            await asyncio.to_thread(sync.tick)
+            await asyncio.to_thread(kb_sync.tick)
         await asyncio.sleep(CONFIG.heartbeat_interval_s)
 
 
@@ -111,6 +123,10 @@ registry = LanguageRegistry(
         "model": CONFIG.model_path, "vocab": CONFIG.vocab_path,
         "knowledge_base": CONFIG.knowledge_base_path, "clip_library": CONFIG.clip_library_path,
     }},
+    # A model the server rolled out earlier outlives a restart (kiosk/model_sync.py).
+    installed=read_installed(CONFIG.synced_models_dir),
+    allow_synthetic=CONFIG.allow_synthetic,
+    kb_dir=CONFIG.synced_kb_dir,
 )
 
 _background_tasks: set[asyncio.Task] = set()
@@ -171,6 +187,7 @@ class KioskConnection:
         part is empty (no words, questions refused, nothing to play back).
         """
         self.pack = pack
+        self.pending_candidates = None    # candidates offered by the previous language's model
         vocab = pack.vocab if pack is not None and pack.vocab is not None else Vocabulary(None)
         self.clips = pack.clips if pack is not None else None
         self.assembler = Assembler(vocab)
@@ -205,19 +222,32 @@ class KioskConnection:
         if msg_type == "language":
             code = message.get("lang")
             pack = registry.get(code)
-            if pack is None or not pack.ready:
+            if pack is None or not pack.selectable:
                 # Never fall back to another language's model: a visitor who picked
                 # American must not be recognised by the Jordanian model, or vice versa.
+                # `selectable` also refuses a model trained only on generated data.
                 await self.send({"type": "error", "code": "language_unavailable",
                                  "message": f"{code!r} has no trained model yet"})
                 return
             self._use_engine(pack)
             self.session.language = code
+            if code != self.capture.language:
+                # The upload carries one language for the whole session. Anything signed
+                # under the previous one would be stored, and later trained on, as this one.
+                self.capture.items.clear()
             self.capture.language = code
             self.session.transition(SessionState.LANGUAGE, language=self.session.language)
             await self.send_state()
 
         elif msg_type == "consent":
+            if message.get("processing") and (self.pack is None or not self.pack.selectable):
+                # A connection starts on the default engine, so a client that never sent a
+                # `language` message would otherwise be recognised by it. The rule that a
+                # language not trained on real people is not offered has to hold on this
+                # path too, not only when a card is pressed.
+                await self.send({"type": "error", "code": "language_unavailable",
+                                 "message": "no language with a trained model has been selected"})
+                return
             self.session.consent_processing = bool(message.get("processing"))
             self.session.consent_retention = bool(message.get("retention"))
             self.capture.consent_retention = self.session.consent_retention
@@ -260,6 +290,27 @@ class KioskConnection:
                 self.perception = None   # frontend gets framing errors instead of a crash
 
     async def _handle_frame(self, message: dict) -> None:
+        # Checked before anything is decoded: the size of the text, then the size the
+        # JPEG header claims. A small file can claim an enormous image, and decoding
+        # it is what would exhaust the device's memory.
+        data = message.get("data")
+        if not isinstance(data, str) or not data or len(data) > CONFIG.max_frame_b64_chars:
+            await self.send({"type": "error", "code": "bad_frame",
+                             "message": "frame data is missing, not text, or too large"})
+            return
+        try:
+            jpeg = decode_base64_frame(data)
+            ts_ms = int(message.get("ts_ms", time.time() * 1000))
+        except (ValueError, TypeError, OverflowError):
+            await self.send({"type": "error", "code": "bad_frame",
+                             "message": "frame is not base64 or its timestamp is not a number"})
+            return
+        size = jpeg_size(jpeg)
+        if size is None or not 0 < size[0] * size[1] <= CONFIG.max_frame_pixels:
+            await self.send({"type": "error", "code": "bad_frame",
+                             "message": "frame is not a JPEG or its image is too large"})
+            return
+
         if self.session.state != SessionState.ACTIVE or not self.session.consent_processing:
             return
         if self.perception is None:
@@ -267,8 +318,7 @@ class KioskConnection:
             return
 
         try:
-            jpeg = decode_base64_frame(message["data"])
-            self.perception.submit_frame(jpeg, int(message.get("ts_ms", time.time() * 1000)))
+            self.perception.submit_frame(jpeg, ts_ms)
         except PerceptionUnavailable as exc:
             await self.send({"type": "error", "code": "perception_error", "message": str(exc)})
             return
@@ -325,7 +375,7 @@ class KioskConnection:
             return
 
         recognizer = self.pack.recognizer if self.pack is not None else None
-        confident = recognizer.confident_threshold if recognizer else CONFIG.confident_threshold
+        confident = recognizer.commit_bar(hypothesis.gloss) if recognizer else CONFIG.confident_threshold
         if hypothesis.confidence >= confident:
             self.assembler.append(hypothesis.gloss)
             self.capture.add(CapturedItem(
@@ -345,9 +395,11 @@ class KioskConnection:
                               "alternatives": hypothesis.alternatives})
 
     async def _handle_select_candidate(self, gloss_id: str | None) -> None:
-        if not gloss_id or self.pending_candidates is None:
+        if not isinstance(gloss_id, str) or self.pending_candidates is None:
             return
         alternatives, raw_frames = self.pending_candidates
+        if gloss_id not in [gloss for gloss, _ in alternatives]:
+            return   # only a candidate that was just offered can be chosen, never an arbitrary word
         top_choice = alternatives[0][0] if alternatives else None
         confidence = next((c for g, c in alternatives if g == gloss_id), 0.0)
 
@@ -444,6 +496,16 @@ class KioskConnection:
             consent_retention=False, started_at=datetime.now(timezone.utc).isoformat(),
         )
 
+    async def release(self) -> None:
+        """Another connection has replaced this one: free its perception and close it."""
+        if self.perception is not None:
+            self.perception.close()
+            self.perception = None
+        try:
+            await self.ws.close(code=SUPERSEDED_CLOSE_CODE)
+        except Exception:
+            logger.debug("superseded_close_failed: the old socket was already gone")
+
     async def check_idle(self) -> bool:
         """Returns True if the connection should keep running."""
         if self.session.state not in (SessionState.ACTIVE, SessionState.CONSENT, SessionState.LANGUAGE):
@@ -457,10 +519,21 @@ class KioskConnection:
         return True
 
 
+SUPERSEDED_CLOSE_CODE = 4001
+_active_connection: KioskConnection | None = None
+
+
 @app.websocket("/ws/session")
 async def ws_session(ws: WebSocket) -> None:
+    global _active_connection
     await ws.accept()
     conn = KioskConnection(ws)
+    # One kiosk has one visitor. A second connection (a reloaded page, a stray tab) takes
+    # over and the older one is closed, so a MediaPipe instance cannot be left running
+    # for a page nobody is looking at: the Jetson's memory has room for one.
+    previous, _active_connection = _active_connection, conn
+    if previous is not None:
+        await previous.release()
     logger.info("session_started", extra={"correlation_id": conn.session.correlation_id})
     await conn.send_state()
     last_idle_check = time.monotonic()
@@ -477,7 +550,18 @@ async def ws_session(ws: WebSocket) -> None:
             except json.JSONDecodeError:
                 await conn.send({"type": "error", "code": "bad_json", "message": "not valid JSON"})
                 continue
-            await conn.handle(message)
+            if not isinstance(message, dict):
+                await conn.send({"type": "error", "code": "bad_message", "message": "a message must be a JSON object"})
+                continue
+            try:
+                await conn.handle(message)
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                # A malformed field must cost the sender an error, not the visitor their session.
+                logger.exception("message_failed", extra={"correlation_id": conn.session.correlation_id})
+                await conn.send({"type": "error", "code": "bad_message",
+                                 "message": "that message could not be handled"})
             # While the camera streams, the receive above never times out, so the
             # idle check has to run on the clock, not only on silence.
             if time.monotonic() - last_idle_check >= 2.0:
@@ -485,9 +569,15 @@ async def ws_session(ws: WebSocket) -> None:
                 last_idle_check = time.monotonic()
     except WebSocketDisconnect:
         logger.info("session_disconnected", extra={"correlation_id": conn.session.correlation_id})
+    except RuntimeError:
+        # Raised by the receive after `release()` closed this socket from the other side.
+        logger.info("session_superseded", extra={"correlation_id": conn.session.correlation_id})
     finally:
+        if _active_connection is conn:
+            _active_connection = None
         if conn.perception is not None:
             conn.perception.close()
+            conn.perception = None
 
 
 class _HttpOnlyStaticFiles(StaticFiles):
@@ -507,5 +597,27 @@ class _HttpOnlyStaticFiles(StaticFiles):
         await super().__call__(scope, receive, send)
 
 
-# Static frontend last, so it never shadows the API/WebSocket routes above.
-app.mount("/", _HttpOnlyStaticFiles(directory=str(REPO_ROOT), html=True), name="frontend")
+# The frontend, last so it never shadows the API/WebSocket routes above. Only what the
+# browser asks for is served: index.html, assets/, and the vocabulary files. The repo
+# root also holds queued visitor sessions, the server's database, models and source,
+# none of which may be reachable from the kiosk's port.
+app.mount("/assets", _HttpOnlyStaticFiles(directory=str(REPO_ROOT / "assets")), name="assets")
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+def frontend() -> FileResponse:
+    return FileResponse(REPO_ROOT / "index.html")
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def vocabulary_file(path: str) -> FileResponse:
+    """The default vocabulary assets/app.js starts with, and each ready language's
+    `vocab_url` from /languages. The path is matched against that list, never opened as given."""
+    allowed = {"core/vocab.json"} | {
+        pack.vocab_path.as_posix() for pack in registry.packs.values() if pack.ready and pack.vocab_path
+    }
+    target = REPO_ROOT / path
+    if path not in allowed or not target.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(target)

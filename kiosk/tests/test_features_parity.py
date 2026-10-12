@@ -47,6 +47,38 @@ def test_kiosk_recognizer_matches_training_time_features_bit_for_bit():
     np.testing.assert_array_equal(kiosk_clip, training_clip)
 
 
+def _utterance_with_idle_ends(idle: int = 5, signing: int = 20, fps: int = 30):
+    """Hands visible only in the middle `signing` frames; `idle` frames of no hands before and after."""
+    landmarks = _synthetic_landmarks(idle + signing + idle)
+    step = 1000 // fps
+    out = []
+    for i, lm in enumerate(landmarks):
+        hands_here = idle <= i < idle + signing
+        out.append(Landmarks(ts_ms=1000 + i * step, pose=lm.pose,
+                             left=lm.left if hands_here else None, right=lm.right if hands_here else None))
+    return Utterance(landmarks=out, t_start=out[0].ts_ms, t_end=out[-1].ts_ms), step
+
+
+def test_duration_is_the_signing_span_not_the_utterance_length():
+    """Training measures a sign from the first to the last frame with a visible hand
+    (ml/extract_landmarks.py idle_bounds); the kiosk must measure the same thing, or a model that
+    reads duration sees idle padding it was never trained with."""
+    utterance, step = _utterance_with_idle_ends(idle=5, signing=20)
+    expected = 20 * step / 1000.0
+    assert abs(Recognizer._signing_seconds(utterance) - expected) < 1e-9
+    whole = (utterance.t_end - utterance.t_start) / 1000.0
+    assert Recognizer._signing_seconds(utterance) < whole
+
+
+def test_feature_versions_4_and_5_match_the_training_time_path_bit_for_bit():
+    from core.features import model_input
+    utterance, _ = _utterance_with_idle_ends()
+    for version in (4, 5):
+        training = model_input(resample([normalise_frame(lm.pose, lm.left, lm.right) for lm in utterance.landmarks]),
+                               version, duration=Recognizer._signing_seconds(utterance))
+        np.testing.assert_array_equal(Recognizer._features(utterance, version), training)
+
+
 def test_missing_hand_stays_none_not_zero():
     """SYSTEM_DESIGN.md §1.1: `None` for an absent hand is distinct from an
     all-zero array — collapsing that distinction silently corrupts features. This

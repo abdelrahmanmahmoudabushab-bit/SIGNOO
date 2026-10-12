@@ -21,8 +21,7 @@ from sqlalchemy.orm import Session
 
 from server.config import settings
 from server.models import ModelVersion, ReviewItem
-
-FRAME_DIM = 203      # core.features.FRAME_DIM; kept literal so a bad row is rejected, not reshaped
+from server.schemas import FRAME_DIM
 
 
 @dataclass
@@ -71,16 +70,20 @@ def _score_candidate(checkpoint_path: str, items: list[ReviewItem]) -> float:
     import torch
 
     sys.path.insert(0, str(settings.ml_dir.parent))
-    from core.features import add_velocity
-    from ml.model import SignTransformer
+    from core.features import model_input, resample
+    from ml.model import build_model
 
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     labels = {index: sign for sign, index in ckpt["labels"].items()}
-    model = SignTransformer(input_dim=ckpt["input_dim"], num_classes=len(labels))
-    model.load_state_dict(ckpt["model"])
-    model.eval()
+    model = build_model(ckpt)
 
-    batch = np.stack([add_velocity(np.asarray(i.landmarks, dtype=np.float32)) for i in items])
+    # Same preprocessing as the kiosk (kiosk/recognition.py): utterances arrive at
+    # whatever length they were signed, and the model only ever saw resampled clips.
+    version = int(ckpt.get("feature_version", 1))
+    if version not in (1, 2):
+        raise ValueError(f"feature version {version} needs face features or the sign's real duration, which "
+                         "kiosk uploads do not carry; it cannot be shadow-scored yet")
+    batch =np.stack([model_input(resample(np.asarray(i.landmarks, dtype=np.float32)), version) for i in items])
     with torch.no_grad():
         predicted = model(torch.from_numpy(batch).float()).argmax(dim=1).tolist()
     correct = sum(labels[p] == i.validated_label for p, i in zip(predicted, items))

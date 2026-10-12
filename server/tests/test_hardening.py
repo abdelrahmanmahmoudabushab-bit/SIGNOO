@@ -12,7 +12,7 @@ from server.config import DEV_JWT_SECRET, settings, startup_problems
 SESSION = {
     "session_id": "s1", "kiosk_id": "k1", "language": "liu", "consent_retention": True,
     "started_at": "t", "ended_at": "t",
-    "items": [{"utterance_id": "u1", "landmarks": [[0.0]], "predicted_gloss": "marhaba",
+    "items": [{"utterance_id": "u1", "landmarks": [[0.0] * 203], "predicted_gloss": "marhaba",
                "confidence": 0.9, "signer_id": "visitor-1"}],
 }
 

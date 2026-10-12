@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>SIGNO — عرض المشروع</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+@page { size: 1280px 720px; margin: 0; }
+:root{
+  --ink:#2B1A26; --muted:#7A6571; --plum:#4A1D3A;
+  --rose:#D94B84; --rose-d:#B3306A; --pink:#FDEEF3; --pink2:#F8D7E3; --pink3:#FBE3EB;
+  --line:#F0D9E2; --gold:#C9A24B; --bg:#FFFFFF;
+  --ok:#2E8B6A; --ok-bg:#E4F5EE; --warn:#A9741A; --warn-bg:#FBF0DA; --off:#8A7A84; --off-bg:#F1ECEF;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#fff}
+body{font-family:'Cairo','Segoe UI',Tahoma,sans-serif;color:var(--ink);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.slide{width:1280px;height:720px;position:relative;overflow:hidden;page-break-after:always;break-after:page;background:var(--bg)}
+.slide:last-child{page-break-after:auto;break-after:auto}
+.tint{background:linear-gradient(180deg,#fff 0%,var(--pink) 100%)}
+.hero{background:radial-gradient(900px 600px at 15% 30%,#FBDCE7 0%,#FDEEF3 45%,#FFFFFF 100%)}
+.latin{font-family:'Space Grotesk','Segoe UI',sans-serif;direction:ltr;unicode-bidi:isolate;letter-spacing:.02em}
+.num{font-family:'Space Grotesk',sans-serif;direction:ltr;unicode-bidi:isolate}
+.pad{position:absolute;inset:0;padding:60px 80px}
+.eyebrow{display:inline-block;font-weight:700;font-size:15px;color:var(--rose-d);background:var(--pink2);padding:5px 16px;border-radius:99px;margin-bottom:14px}
+h2{font-size:42px;font-weight:900;line-height:1.25;color:var(--plum)}
+h2 em{font-style:normal;color:var(--rose)}
+.sub{font-size:19px;color:var(--muted);margin-top:8px}
+.foot{position:absolute;bottom:24px;inset-inline:80px;display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#B39AA7}
+.foot b{color:var(--plum);font-size:15px}
+.card{background:#fff;border:1px solid var(--line);border-radius:20px;box-shadow:0 10px 28px rgba(179,48,106,.07)}
+.ico{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(135deg,#EE6B9E,var(--rose-d));flex:none}
+.ico svg{width:27px;height:27px;stroke:#fff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.card h3{font-size:21px;font-weight:700;color:var(--plum);margin:12px 0 5px}
+.card p{font-size:16px;line-height:1.7;color:var(--muted)}
+.chip{display:inline-block;font-size:13px;font-weight:700;padding:3px 12px;border-radius:99px}
+.ok{background:var(--ok-bg);color:var(--ok)}.warn{background:var(--warn-bg);color:var(--warn)}.off{background:var(--off-bg);color:var(--off)}
+.blob{position:absolute;border-radius:50%;filter:blur(60px);pointer-events:none}
+.note{padding:16px 24px;border-radius:16px;background:var(--pink);border:1px solid var(--pink2);color:var(--plum);font-size:16.5px;font-weight:600;line-height:1.7}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <linearGradient id="kb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5A2A48"/><stop offset="1" stop-color="#2B1224"/></linearGradient>
+  <linearGradient id="ks" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#FDEEF3"/></linearGradient>
+  <linearGradient id="kr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EE6B9E"/><stop offset="1" stop-color="#B3306A"/></linearGradient>
+  <symbol id="kiosk" viewBox="0 0 260 520">
+   <ellipse cx="130" cy="500" rx="105" ry="14" fill="#B3306A" opacity=".18"/>
+   <rect x="92" y="330" width="14" height="160" rx="3" fill="#3C1A30"/><rect x="154" y="330" width="14" height="160" rx="3" fill="#3C1A30"/>
+   <rect x="92" y="395" width="76" height="12" fill="#5A2A48"/>
+   <rect x="40" y="484" width="180" height="16" rx="6" fill="url(#kb)"/>
+   <rect x="20" y="10" width="220" height="340" rx="22" fill="url(#kb)"/>
+   <rect x="20" y="10" width="220" height="340" rx="22" fill="none" stroke="#8A4A72" stroke-width="2"/>
+   <rect x="100" y="22" width="60" height="9" rx="4.5" fill="#150811"/><circle cx="130" cy="26.5" r="2.6" fill="#EE6B9E"/>
+   <rect x="34" y="42" width="192" height="236" rx="10" fill="url(#ks)"/>
+   <g transform="translate(130 128)" fill="none" stroke="url(#kr)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+     <path d="M-20 38 V-8 a7 7 0 0 1 14 0 V-22 a7 7 0 0 1 14 0 V-26 a7 7 0 0 1 14 0 V-18 a7 7 0 0 1 14 0 V22 c0 22 -14 38 -34 38 h-4 c-14 0 -24 -8 -32 -22 l-14 -24 a7 7 0 0 1 12 -7 l10 12"/></g>
+   <text x="130" y="224" text-anchor="middle" font-family="Space Grotesk,Segoe UI,sans-serif" font-weight="700" font-size="30" fill="#4A1D3A" letter-spacing="2">SIGNO</text>
+   <rect x="82" y="238" width="96" height="4" rx="2" fill="#C9A24B"/>
+   <rect x="34" y="292" width="192" height="42" rx="8" fill="#2B1224"/>
+   <circle cx="56" cy="313" r="5" fill="#EE6B9E"/><rect x="70" y="308" width="110" height="5" rx="2.5" fill="#6B3A58"/><rect x="70" y="317" width="70" height="5" rx="2.5" fill="#4F2742"/>
+  </symbol></defs></svg>
+
+<!-- 1. COVER -->
+<section class="slide hero">
+  <div class="blob" style="width:420px;height:420px;background:#F6B8CE;right:80px;top:-160px;opacity:.5"></div>
+  <div class="blob" style="width:380px;height:380px;background:#F8D7E3;left:-120px;bottom:-160px;opacity:.7"></div>
+  <div class="pad" style="display:flex;align-items:center;justify-content:space-between;padding-inline:100px">
+    <div style="width:650px">
+      <div class="latin" style="font-size:100px;font-weight:700;line-height:1;color:var(--rose-d)">SIGNO</div>
+      <div style="width:90px;height:5px;border-radius:3px;background:var(--gold);margin:22px 0"></div>
+      <div style="font-size:44px;font-weight:900;line-height:1.3;color:var(--plum)">الشاشة التفاعلية الذكية</div>
+      <p style="font-size:22px;line-height:1.8;color:var(--muted);margin-top:14px">كشك يقف أمامه الزائر الأصم، فيشير بلغته، ويُفهَم، ويأتيه الجواب بلغة الإشارة — بدون مترجم وبدون وسيط.</p>
+      <div style="margin-top:32px;display:flex;gap:12px;font-size:15px;font-weight:700;color:var(--rose-d)">
+        <span style="padding:8px 18px;background:#fff;border:1px solid var(--pink2);border-radius:99px">لغة الإشارة الأردنية أولاً</span>
+        <span style="padding:8px 18px;background:#fff;border:1px solid var(--pink2);border-radius:99px">عرض شراكة وتمويل</span>
+      </div>
+    </div>
+    <div style="position:relative;width:340px;height:620px">
+      <div class="blob" style="inset:90px 10px;background:#F6B8CE;opacity:.6"></div>
+      <svg viewBox="0 0 260 520" style="position:relative;width:100%;height:100%"><use href="#kiosk"/></svg>
+    </div>
+  </div>
+</section>
+
+<!-- 2. OVERVIEW -->
+<section class="slide tint">
+  <div class="pad">
+    <span class="eyebrow">نظرة عامة</span>
+    <h2>ما هو <em class="latin">SIGNO</em>؟</h2>
+    <p class="sub">كشك عام يفهم لغة الإشارة ويجيب عنها — ليس أداة مساعدة شكلية، بل لغة كاملة تُعامَل كلغة</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:40px">
+      <div class="card" style="padding:28px"><div class="ico"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="16" rx="2"/><path d="M9 22h6M12 18v4"/><circle cx="12" cy="8" r="2"/></svg></div>
+        <h3>الفكرة</h3><p>كاميرا وشاشة وذكاء اصطناعي يلتقط حركة اليدين والوجه، يتعرّف على الكلمات، ويردّ بنص وصوت وبلغة الإشارة نفسها.</p></div>
+      <div class="card" style="padding:28px"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18v.01"/></svg></div>
+        <h3>المشكلة</h3><p>الأصم يحتاج مترجماً أو قريباً في المستشفى والدائرة الحكومية والبنك، والمترجم لا يتوفر في كل مكان وكل ساعة.</p></div>
+      <div class="card" style="padding:28px"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg></div>
+        <h3>الأثر</h3><p>استقلالية وخصوصية ووصول عادل للخدمات، وفي الوقت نفسه بناء أول قاعدة بيانات مدقَّقة للغة الإشارة الأردنية.</p></div>
+    </div>
+    <div class="note" style="margin-top:32px;display:flex;gap:14px;align-items:center"><span style="width:6px;height:30px;border-radius:3px;background:var(--rose)"></span>لغات الإشارة لغات كاملة، ويُقاس النظام بمعيار إصابتها الصحيحة، لا بمعيار «أفضل من لا شيء».</div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">02</span></div>
+</section>
+
+<!-- 3. PROBLEM -->
+<section class="slide">
+  <div class="blob" style="width:420px;height:420px;background:#FBE3EB;left:-120px;top:-140px;opacity:.9"></div>
+  <div class="pad">
+    <span class="eyebrow">المشكلة</span>
+    <h2>فجوة التواصل <em>ليست مجرد صعوبة</em></h2>
+    <p class="sub">إنها فجوة هيكلية تسبب إقصاءً مكانياً واجتماعياً يومياً</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:38px">
+      <div class="card" style="padding:26px 28px;border-inline-start:6px solid var(--rose)"><div class="num" style="font-weight:700;color:var(--rose)">01</div><h3 style="margin:4px 0">الوصول الطبي</h3><p>تأخر التواصل في الحالات الطبية قد يؤدي إلى مخاطر حقيقية على الصحة والحياة.</p></div>
+      <div class="card" style="padding:26px 28px;border-inline-start:6px solid var(--rose)"><div class="num" style="font-weight:700;color:var(--rose)">02</div><h3 style="margin:4px 0">الخصوصية</h3><p>اضطرار مستخدم لغة الإشارة للاعتماد على أفراد عائلته في المعاملات الحساسة.</p></div>
+      <div class="card" style="padding:26px 28px;border-inline-start:6px solid var(--rose)"><div class="num" style="font-weight:700;color:var(--rose)">03</div><h3 style="margin:4px 0">الاستقلالية</h3><p>المهام اليومية، كالسفر والخدمات الحكومية، تصبح عبئاً نفسياً ثقيلاً.</p></div>
+      <div class="card" style="padding:26px 28px;border-inline-start:6px solid var(--rose)"><div class="num" style="font-weight:700;color:var(--rose)">04</div><h3 style="margin:4px 0">محدودية المترجم البشري</h3><p>من المستحيل عملياً توفير مترجم لغة إشارة على مدار الساعة في كل المرافق.</p></div>
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">03</span></div>
+</section>
+
+<!-- 4. FIVE BLOCKS -->
+<section class="slide tint">
+  <div class="pad">
+    <span class="eyebrow">كيف يعمل</span>
+    <h2>خمس كتل، <em>أربع منها تعمل دون إنترنت</em></h2>
+    <p class="sub">يخدم الكشك الزائر بالكامل بنفسه؛ انقطاع الشبكة يؤخّر التحسّن فقط، ولا يوقف الخدمة</p>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-top:44px">
+      <div class="card" style="padding:22px 18px;text-align:center"><div class="num" style="color:var(--rose);font-weight:700;font-size:15px">01</div><div class="ico" style="margin:8px auto"><svg viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div><h3 style="font-size:19px">الحضور والالتقاط</h3><p style="font-size:14.5px">يلاحظ الزائر، يشغّل الكاميرا، ويستخرج نقاط حركة اليدين والجسم</p></div>
+      <div class="card" style="padding:22px 18px;text-align:center"><div class="num" style="color:var(--rose);font-weight:700;font-size:15px">02</div><div class="ico" style="margin:8px auto"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></svg></div><h3 style="font-size:19px">الفهم</h3><p style="font-size:14.5px">يقسّم الحركة إلى كلمات ويتعرّف عليها ويركّبها جملة</p></div>
+      <div class="card" style="padding:22px 18px;text-align:center"><div class="num" style="color:var(--rose);font-weight:700;font-size:15px">03</div><div class="ico" style="margin:8px auto"><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div><h3 style="font-size:19px">الاستجابة</h3><p style="font-size:14.5px">ينطق النتيجة، يجيب عن الأسئلة، ويعرض الجواب بلغة الإشارة</p></div>
+      <div class="card" style="padding:22px 18px;text-align:center"><div class="num" style="color:var(--rose);font-weight:700;font-size:15px">04</div><div class="ico" style="margin:8px auto"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div><h3 style="font-size:19px">تجربة الكشك</h3><p style="font-size:14.5px">شاشات مرئية بالكامل، وتسجيل بيانات اختياري بموافقة</p></div>
+      <div class="card" style="padding:22px 18px;text-align:center;background:var(--pink);border-style:dashed;border-color:var(--rose)"><div class="num" style="color:var(--rose);font-weight:700;font-size:15px">05</div><div class="ico" style="margin:8px auto"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg></div><h3 style="font-size:19px">حلقة التعلّم</h3><p style="font-size:14.5px">خادم ولوحة تحكم: مراجعة، إعادة تدريب، بوابة جودة، نشر</p><span class="chip warn" style="margin-top:8px">تحتاج شبكة</span></div>
+    </div>
+    <div class="note" style="margin-top:34px">الأفاتار يعرض حركات مسجّلة من مُشيرين حقيقيين فقط، ولا يولّد إشارات من تلقاء نفسه — لأن الأصم لا يستطيع اكتشاف إشارة خاطئة تبدو مقنعة.</div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">04</span></div>
+</section>
+
+<!-- 5. JOURNEY -->
+<section class="slide">
+  <div class="blob" style="width:460px;height:460px;background:#FBE3EB;right:-140px;bottom:-200px;opacity:.9"></div>
+  <div class="pad">
+    <span class="eyebrow">تجربة الزائر</span>
+    <h2>تجربة طبيعية… <em>بدون تعقيد</em></h2>
+    <p class="sub">كل حالة تظهر على الشاشة — لا تعتمد أي رسالة على الصوت وحده</p>
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:50px">
+      <div class="card" style="padding:22px 12px;text-align:center"><div class="num" style="font-size:38px;font-weight:700;color:var(--rose)">1</div><div style="font-size:18px;font-weight:700;color:var(--plum);margin:6px 0">ترحيب</div><div style="font-size:14px;color:var(--muted);line-height:1.6">الكشك يلاحظ الاقتراب</div></div>
+      <div class="card" style="padding:22px 12px;text-align:center"><div class="num" style="font-size:38px;font-weight:700;color:var(--rose)">2</div><div style="font-size:18px;font-weight:700;color:var(--plum);margin:6px 0">اختيار اللغة</div><div style="font-size:14px;color:var(--muted);line-height:1.6">بطاقة لكل لغة إشارة</div></div>
+      <div class="card" style="padding:22px 12px;text-align:center"><div class="num" style="font-size:38px;font-weight:700;color:var(--rose)">3</div><div style="font-size:18px;font-weight:700;color:var(--plum);margin:6px 0">الموافقة</div><div style="font-size:14px;color:var(--muted);line-height:1.6">اختيار واضح بشأن البيانات</div></div>
+      <div class="card" style="padding:22px 12px;text-align:center"><div class="num" style="font-size:38px;font-weight:700;color:var(--rose)">4</div><div style="font-size:18px;font-weight:700;color:var(--plum);margin:6px 0">الإشارة</div><div style="font-size:14px;color:var(--muted);line-height:1.6">يُشير بشكل طبيعي</div></div>
+      <div class="card" style="padding:22px 12px;text-align:center"><div class="num" style="font-size:38px;font-weight:700;color:var(--rose)">5</div><div style="font-size:18px;font-weight:700;color:var(--plum);margin:6px 0">الجواب</div><div style="font-size:14px;color:var(--muted);line-height:1.6">نص وصوت وإشارة</div></div>
+      <div class="card" style="padding:22px 12px;text-align:center;background:linear-gradient(160deg,#EE6B9E,var(--rose-d));border:none"><div class="num" style="font-size:38px;font-weight:700;color:#fff">6</div><div style="font-size:18px;font-weight:700;color:#fff;margin:6px 0">شكراً</div><div style="font-size:14px;color:#FFE6EF;line-height:1.6">تُمحى الجلسة</div></div>
+    </div>
+    <div style="margin-top:46px;text-align:center;font-size:19px;font-weight:700;color:var(--rose-d)">لا قفازات إلكترونية &nbsp;•&nbsp; لا حساسات معقدة &nbsp;•&nbsp; لا إجراءات غير ضرورية</div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">05</span></div>
+</section>
+
+<!-- 6. TRUST -->
+<section class="slide tint">
+  <div class="pad">
+    <span class="eyebrow">الثقة</span>
+    <h2>مبادئ لا نتنازل عنها <em>حتى لو أبطأتنا</em></h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:38px">
+      <div class="card" style="padding:24px 28px;display:flex;gap:20px"><div class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><div><h3 style="margin:0 0 4px">خصوصية افتراضية</h3><p style="font-size:15.5px">الفيديو لا يغادر الجهاز دون موافقة الزائر. المحفوظ افتراضياً هو نقاط الحركة لا الصور، وتُمحى الجلسة عند العودة للخمول، وللزائر طلب حذف بياناته.</p></div></div>
+      <div class="card" style="padding:24px 28px;display:flex;gap:20px"><div class="ico"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></div><div><h3 style="margin:0 0 4px">لا نُولّد إشارات</h3><p style="font-size:15.5px">الأفاتار يعيد تمثيل حركة سُجّلت من مُشير حقيقي. وكل كلمة تُراجَع من خبير أصم قبل أن تُعرض على زائر.</p></div></div>
+      <div class="card" style="padding:24px 28px;display:flex;gap:20px"><div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><div><h3 style="margin:0 0 4px">تعلّم تلقائي، وترقية بشرية</h3><p style="font-size:15.5px">يُدرَّب مرشّح جديد كل ٣ أيام تلقائياً، لكنه لا يُنشر إلا بعد اجتياز بوابة جودة صارمة لا يمكن تجاوزها.</p></div></div>
+      <div class="card" style="padding:24px 28px;display:flex;gap:20px"><div class="ico"><svg viewBox="0 0 24 24"><path d="M12 2 4 6v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V6z"/></svg></div><div><h3 style="margin:0 0 4px">لغة بلا بيانات حقيقية = «قريباً»</h3><p style="font-size:15.5px">لا نشغّل نموذجاً غير مدرَّب على بيانات حقيقية ونسمّيه تعرّفاً. ولا تُخدَم لغة بنموذج لغة أخرى أبداً.</p></div></div>
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">06</span></div>
+</section>
+
+<!-- 7. QUALITY -->
+<section class="slide">
+  <div class="blob" style="width:400px;height:400px;background:#FBE3EB;left:-120px;bottom:-160px;opacity:.9"></div>
+  <div class="pad">
+    <span class="eyebrow">معايير القبول</span>
+    <h2>كم ندقّق؟ <em>أرقام ملزِمة قبل أي إطلاق</em></h2>
+    <p class="sub">هذه أهداف يجب بلوغها على بيانات حقيقية لكل لغة، وهي ليست نتائج محقَّقة بعد للغة الأردنية</p>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:22px;margin-top:40px">
+      <div class="card" style="padding:28px 22px;text-align:center"><div class="num" style="font-size:54px;font-weight:700;color:var(--rose)">85<span style="font-size:30px">%</span></div><div style="font-size:19px;font-weight:700;color:var(--plum);margin:6px 0">دقة الكلمة</div><p style="font-size:14.5px">أول اقتراح صحيح لكل لغة، على اختبار مجمَّد</p></div>
+      <div class="card" style="padding:28px 22px;text-align:center"><div class="num" style="font-size:54px;font-weight:700;color:var(--rose)">70<span style="font-size:30px">%</span></div><div style="font-size:19px;font-weight:700;color:var(--plum);margin:6px 0">أسوأ مُشير</div><p style="font-size:14.5px">المتوسط لا يُخفي مُشيراً يفشل معه النظام</p></div>
+      <div class="card" style="padding:28px 22px;text-align:center"><div class="num" style="font-size:54px;font-weight:700;color:var(--rose)">95<span style="font-size:30px">%</span></div><div style="font-size:19px;font-weight:700;color:var(--plum);margin:6px 0">ضمن أفضل ثلاثة</div><p style="font-size:14.5px">الشاشة تعرض بدائل ليختار الزائر</p></div>
+      <div class="card" style="padding:28px 22px;text-align:center"><div class="num" style="font-size:54px;font-weight:700;color:var(--rose)">0.3<span style="font-size:24px"> ث</span></div><div style="font-size:19px;font-weight:700;color:var(--plum);margin:6px 0">زمن الاستجابة</div><p style="font-size:14.5px">من نهاية الإشارة إلى ظهور الكلمة</p></div>
+    </div>
+    <div class="note" style="margin-top:30px"><b style="color:var(--rose-d)">طريقة القياس:</b> التقسيم دائماً بحسب المُشير، فلا يُختبَر النموذج على شخص تدرّب عليه. ولا يُحتسب أي رقم من بيانات اصطناعية.</div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">07</span></div>
+</section>
+
+<!-- 8. LANGUAGES -->
+<section class="slide tint">
+  <div class="pad">
+    <span class="eyebrow">اللغات</span>
+    <h2>تسع بطاقات لغة، <em>ولكل لغة محرّكها المستقل</em></h2>
+    <p class="sub">نموذج ومفردات ومعرفة ومكتبة إشارات لكل لغة — لأن لغات الإشارة لغات مستقلة وليست ترجمة لبعضها</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:34px">
+      <div class="card" style="padding:18px 22px;border-color:var(--rose)"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:var(--plum)">الأردن <span class="latin" style="font-size:14px;color:var(--muted)">LIU</span></b><span class="chip warn">قيد البناء</span></div><p style="font-size:14px;margin-top:6px">تحتاج تسجيلات حقيقية لمُشيرين أردنيين</p></div>
+      <div class="card" style="padding:18px 22px;border-color:var(--rose)"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:var(--plum)">أمريكية <span class="latin" style="font-size:14px;color:var(--muted)">ASL</span></b><span class="chip ok">تجريبي</span></div><p style="font-size:14px;margin-top:6px">٨ إشارات، ٨٥٫٤٪ على ٥ مُشيرين لم يُدرَّب عليهم</p></div>
+      <div class="card" style="padding:18px 22px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:var(--plum)">السعودية</b><span class="chip off">قريباً</span></div></div>
+      <div class="card" style="padding:18px 22px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:var(--plum)">الإمارات</b><span class="chip off">قريباً</span></div></div>
+      <div class="card" style="padding:18px 22px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:var(--plum)">عُمان</b><span class="chip off">قريباً</span></div></div>
+      <div class="card" style="padding:18px 22px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:var(--plum)">قطر</b><span class="chip off">قريباً</span></div></div>
+      <div class="card" style="padding:18px 22px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:var(--plum)">فرنسية <span class="latin" style="font-size:14px;color:var(--muted)">LSF</span></b><span class="chip off">قريباً</span></div></div>
+      <div class="card" style="padding:18px 22px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:var(--plum)">بريطانية <span class="latin" style="font-size:14px;color:var(--muted)">BSL</span></b><span class="chip off">قريباً</span></div></div>
+      <div class="card" style="padding:18px 22px"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px;color:var(--plum)">الإشارة الدولية</b><span class="chip off">قريباً</span></div></div>
+    </div>
+    <div class="note" style="margin-top:22px;font-size:15px">نتيجة الإشارة الأمريكية تثبت أن خط التدريب يعمل على إشارات بشرية حقيقية، ولا تقول شيئاً عن اللغة الأردنية.</div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">08</span></div>
+</section>
+
+<!-- 9. WHERE -->
+<section class="slide">
+  <div class="blob" style="width:420px;height:420px;background:#FBE3EB;right:-140px;top:-160px;opacity:.9"></div>
+  <div class="pad">
+    <span class="eyebrow">مجالات التطبيق</span>
+    <h2>أين يصنع <em class="latin">SIGNO</em> فرقاً؟</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px">
+      <div class="card" style="padding:28px 30px;display:flex;gap:22px"><div class="ico" style="width:64px;height:64px"><svg viewBox="0 0 24 24" style="width:32px;height:32px"><path d="M3 21V8l9-5 9 5v13M9 21v-6h6v6M12 8v4M10 10h4"/></svg></div><div><h3 style="margin:0 0 6px">المستشفيات والمراكز الطبية</h3><p>إرشاد المرضى إلى الطوارئ والعيادات بسرعة، حيث تهم كل دقيقة.</p></div></div>
+      <div class="card" style="padding:28px 30px;display:flex;gap:22px"><div class="ico" style="width:64px;height:64px"><svg viewBox="0 0 24 24" style="width:32px;height:32px"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg></div><div><h3 style="margin:0 0 6px">المطارات ومحطات السفر</h3><p>معرفة بوابات المغادرة ومناطق استلام الأمتعة.</p></div></div>
+      <div class="card" style="padding:28px 30px;display:flex;gap:22px"><div class="ico" style="width:64px;height:64px"><svg viewBox="0 0 24 24" style="width:32px;height:32px"><path d="M3 10 12 3l9 7M5 10v9M9.5 10v9M14.5 10v9M19 10v9M3 21h18"/></svg></div><div><h3 style="margin:0 0 6px">الدوائر الحكومية</h3><p>توجيه المراجعين نحو المكاتب وإتمام معاملاتهم بخصوصية تامة.</p></div></div>
+      <div class="card" style="padding:28px 30px;display:flex;gap:22px"><div class="ico" style="width:64px;height:64px"><svg viewBox="0 0 24 24" style="width:32px;height:32px"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg></div><div><h3 style="margin:0 0 6px">البنوك والخدمات المالية</h3><p>إجراء المعاملات المالية باستقلالية وسرّية.</p></div></div>
+    </div>
+    <div class="note" style="margin-top:28px">يجيب الكشك من قاعدة معرفة خاصة بكل موقع. وما ليس فيها يرفض الإجابة عنه ويحيل الزائر إلى موظف، ولا يخترع جواباً.</div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">09</span></div>
+</section>
+
+<!-- 10. STATUS -->
+<section class="slide tint">
+  <div class="pad">
+    <span class="eyebrow">أين وصلنا</span>
+    <h2>البرمجيات جاهزة <em>والعائق الحقيقي هو البيانات</em></h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:34px">
+      <div class="card" style="padding:26px 30px">
+        <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">ما أُنجز</h3><span class="chip ok">مبني ومُختبَر</span></div>
+        <ul style="list-style:none;margin-top:14px;display:grid;gap:11px;font-size:16.5px;line-height:1.6;color:var(--ink)">
+          <li>● وقت التشغيل الكامل للكشك: التقاط، فهم، استجابة، جلسات</li>
+          <li>● الخادم وبوابة الجودة وإعادة التدريب كل ٣ أيام</li>
+          <li>● لوحة تحكم للمراجعة والنماذج والأسطول</li>
+          <li>● تطبيق شاشة كاملة يُشغَّل وحده ويتعافى من الأعطال</li>
+          <li>● تشغيل أولي على جهاز Jetson Orin Nano</li>
+          <li>● أكثر من ٦٠ اختباراً آلياً</li>
+        </ul>
+      </div>
+      <div class="card" style="padding:26px 30px;border-color:var(--rose)">
+        <div style="display:flex;justify-content:space-between;align-items:center"><h3 style="margin:0">ما ينقصنا</h3><span class="chip warn">مفتوح</span></div>
+        <ul style="list-style:none;margin-top:14px;display:grid;gap:11px;font-size:16.5px;line-height:1.6;color:var(--ink)">
+          <li><b style="color:var(--rose-d)">● تسجيلات حقيقية للغة الأردنية</b> — لا توجد بيانات مُشيرين حقيقية بعد، وهذا أكبر عائق في المشروع</li>
+          <li>● قياس الأداء على الجهاز تحت الحرارة العالية لمدة ٢٠ دقيقة</li>
+          <li>● الأفاتار الذي يعرض الإشارة: التصميم محسوم، والبناء لم يبدأ</li>
+          <li>● مكتبة الإشارات المسجّلة لإجابات الكشك</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note" style="margin-top:26px">لذلك تبدأ خارطة الطريق بالبيانات لا بالبرمجة: أي مال أو شراكة في المرحلة الأولى تذهب مباشرة إلى تسجيل اللغة ومراجعتها مع الخبراء الصم.</div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">10</span></div>
+</section>
+
+<!-- 11. ROADMAP -->
+<section class="slide">
+  <div class="blob" style="width:420px;height:420px;background:#FBE3EB;left:-140px;top:-160px;opacity:.9"></div>
+  <div class="pad">
+    <span class="eyebrow">خارطة الطريق</span>
+    <h2>نحو <em>٢٩ أسبوعاً</em> من الفكرة إلى كشك يعمل</h2>
+    <p class="sub">كل مرحلة تنتهي بقرار مبني على معايير، لا بعرض تجريبي</p>
+    <div style="position:relative;margin-top:50px">
+      <div style="position:absolute;top:19px;inset-inline:5%;height:3px;background:linear-gradient(90deg,var(--rose),var(--gold))"></div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px">
+        <div><div class="num" style="width:40px;height:40px;border-radius:50%;background:var(--rose);color:#fff;display:grid;place-items:center;font-weight:700;position:relative;margin-inline-start:6%">0</div>
+          <div class="card" style="margin-top:20px;padding:18px 16px;min-height:230px"><div style="color:var(--rose-d);font-weight:700;font-size:14px">≈ ٣ أسابيع</div><div style="font-size:19px;font-weight:800;color:var(--plum);margin:4px 0 8px">الأسس</div><p style="font-size:14px;line-height:1.7">قياس الجهاز تحت الحرارة، حزمة الموافقة والاعتبارات الأخلاقية، بدء تجنيد المُشيرين</p></div></div>
+        <div><div class="num" style="width:40px;height:40px;border-radius:50%;background:var(--rose);color:#fff;display:grid;place-items:center;font-weight:700;margin-inline-start:6%">1</div>
+          <div class="card" style="margin-top:20px;padding:18px 16px;min-height:230px"><div style="color:var(--rose-d);font-weight:700;font-size:14px">≈ ٦ أسابيع</div><div style="font-size:19px;font-weight:800;color:var(--plum);margin:4px 0 8px">التعرّف على الكلمات</div><p style="font-size:14px;line-height:1.7">٥٠ إشارة × ١٠ مُشيرين × ٥ تكرارات، يراجعها خبراء صم، وتدريب النموذج</p></div></div>
+        <div><div class="num" style="width:40px;height:40px;border-radius:50%;background:var(--rose);color:#fff;display:grid;place-items:center;font-weight:700;margin-inline-start:6%">2</div>
+          <div class="card" style="margin-top:20px;padding:18px 16px;min-height:230px"><div style="color:var(--rose-d);font-weight:700;font-size:14px">≈ ٦ أسابيع</div><div style="font-size:19px;font-weight:800;color:var(--plum);margin:4px 0 8px">الكشك على الجهاز</div><p style="font-size:14px;line-height:1.7">خمسة مستخدمين صم ينهون جلسة دون مساعدة، و٧٢ ساعة تشغيل دون تدخل</p></div></div>
+        <div><div class="num" style="width:40px;height:40px;border-radius:50%;background:var(--rose);color:#fff;display:grid;place-items:center;font-weight:700;margin-inline-start:6%">3</div>
+          <div class="card" style="margin-top:20px;padding:18px 16px;min-height:230px"><div style="color:var(--rose-d);font-weight:700;font-size:14px">≈ ٦ أسابيع</div><div style="font-size:19px;font-weight:800;color:var(--plum);margin:4px 0 8px">الجواب بالإشارة</div><p style="font-size:14px;line-height:1.7">أسئلة وأجوبة بالإشارة، ويكفي أن يفهمها ٨ من كل ١٠ مستخدمين صم</p></div></div>
+        <div><div class="num" style="width:40px;height:40px;border-radius:50%;background:var(--gold);color:#fff;display:grid;place-items:center;font-weight:700;margin-inline-start:6%">4</div>
+          <div class="card" style="margin-top:20px;padding:18px 16px;min-height:230px"><div style="color:#A9741A;font-weight:700;font-size:14px">≈ ٨ أسابيع</div><div style="font-size:19px;font-weight:800;color:var(--plum);margin:4px 0 8px">التعلّم من الاستخدام</div><p style="font-size:14px;line-height:1.7">مراجعة بيانات الزوار، وإعادة تدريب وبوابة جودة، ونشر مرحلي على الأسطول</p></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">11</span></div>
+</section>
+
+<!-- 12. VISION + PARTNERS -->
+<section class="slide hero">
+  <div class="blob" style="width:420px;height:420px;background:#F6B8CE;right:-120px;bottom:-180px;opacity:.5"></div>
+  <div class="pad" style="display:flex;gap:60px;align-items:center;padding-inline:90px">
+    <div style="flex:1.2">
+      <span class="eyebrow">الشراكة</span>
+      <h2>نبني مستقبلاً <em>أكثر شمولاً… معاً</em></h2>
+      <p class="sub" style="font-size:18px">ما نطلبه ليبدأ المشروع فعلياً:</p>
+      <div style="margin-top:18px;display:grid;gap:12px">
+        <div class="card" style="padding:16px 22px;display:flex;gap:16px;align-items:center"><span class="num" style="font-size:26px;font-weight:700;color:var(--rose)">1</span><div><b style="color:var(--plum);font-size:18px">مُشيرون وخبراء صم</b><div style="font-size:14.5px;color:var(--muted)">من جمعيات ومعاهد الصم، لتسجيل اللغة ومراجعتها</div></div></div>
+        <div class="card" style="padding:16px 22px;display:flex;gap:16px;align-items:center"><span class="num" style="font-size:26px;font-weight:700;color:var(--rose)">2</span><div><b style="color:var(--plum);font-size:18px">موقع تجريبي</b><div style="font-size:14.5px;color:var(--muted)">مستشفى أو دائرة أو مطار لتركيب أول كشك</div></div></div>
+        <div class="card" style="padding:16px 22px;display:flex;gap:16px;align-items:center"><span class="num" style="font-size:26px;font-weight:700;color:var(--rose)">3</span><div><b style="color:var(--plum);font-size:18px">تمويل المرحلتين الأولى والثانية</b><div style="font-size:14.5px;color:var(--muted)">جمع البيانات وبناء النموذج الأولي</div></div></div>
+      </div>
+      <div style="margin-top:20px;font-size:15px;color:var(--muted);line-height:1.8">الجهات التي نتطلع للعمل معها: المجلس الأعلى لحقوق الأشخاص ذوي الإعاقة، وزارة الاقتصاد الرقمي والريادة، إدارة المطارات، منظمات الدمج الدولية مثل <span class="latin">UNDP</span> &nbsp;و&nbsp; <span class="latin">UNICEF</span>، والبنوك وشركات الاتصالات ضمن مبادرات المسؤولية المجتمعية.</div>
+    </div>
+    <div style="flex:.8;text-align:center">
+      <div class="latin" style="font-size:84px;font-weight:700;line-height:1;color:var(--rose-d)">SIGNO</div>
+      <div style="width:70px;height:4px;border-radius:2px;background:var(--gold);margin:20px auto"></div>
+      <div style="font-size:19px;font-weight:700;color:var(--plum);line-height:1.9">الذكاء الاصطناعي<br>سهولة الوصول<br>الدمج · الابتكار</div>
+      <div style="margin-top:26px;font-size:15.5px;color:var(--muted);line-height:1.8">لاحقاً: مسح رمز <span class="latin">QR</span> لنقل التوجيهات إلى هاتف الزائر، والتوسع إلى لغات إشارة عربية وعالمية أخرى، ثم المطارات حول العالم.</div>
+      <div style="margin-top:26px;padding:14px 24px;border-radius:99px;background:linear-gradient(135deg,#EE6B9E,var(--rose-d));color:#fff;font-weight:700;font-size:17px;display:inline-block">لنبدأ المرحلة الأولى معاً</div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

@@ -18,8 +18,10 @@ from server.config import settings
 from server.db import get_db
 from server.gate import evaluate_gate
 from server.models import ModelVersion
+from server.rollouts import retire
 from server.schemas import ModelVersionOut
 from server.shadow import evaluate_shadow
+from server.training import find_champion
 
 router = APIRouter(prefix="/registry", tags=["registry"])
 READ_ROLES = ("operator", "reviewer", "engineer", "admin")
@@ -66,12 +68,7 @@ def complete_shadow(
         # Re-judging a live or retired model would silently demote it to "shadow"/"rejected".
         raise HTTPException(status_code=409, detail=f"version is '{candidate.status}'; nothing to judge")
 
-    champion_stmt = (
-        select(ModelVersion)
-        .where(ModelVersion.language == candidate.language, ModelVersion.status == "promoted")
-        .order_by(ModelVersion.promoted_at.desc())
-    )
-    champion = db.scalars(champion_stmt).first()
+    champion = find_champion(db, candidate.language)
 
     # Latency was already measured at training time and is stable for a fixed
     # checkpoint, so it is re-read from the stored gate (a structured measurement,
@@ -109,6 +106,7 @@ def complete_shadow(
            if shadow.champion_accuracy is not None else {}),
     })
     candidate.gate = verdict.as_dict()
+    candidate.champion_version = champion.version if champion else None
     candidate.shadow_started_at = candidate.shadow_started_at or datetime.now(timezone.utc)
     candidate.status = "shadow" if verdict.passed else "rejected"
     db.commit()
@@ -133,6 +131,17 @@ def promote(
     if not candidate.gate.get("passed"):
         # SYSTEM_DESIGN §6: "Promotion gate rejects candidate -> champion stays".
         raise HTTPException(status_code=409, detail="gate did not pass; champion unchanged")
+    champion = find_champion(db, candidate.language)
+    current = champion.version if champion else None
+    if candidate.champion_version != current:
+        # The stored verdict compares this candidate with a model that is no longer
+        # the champion; passing that says nothing about the one it would replace.
+        raise HTTPException(
+            status_code=409,
+            detail=f"gate was judged against champion '{candidate.champion_version}', but the current "
+                   f"'{candidate.language}' champion is '{current}'; re-run "
+                   f"POST /registry/{version}/shadow-complete first",
+        )
 
     candidate.status = "promoted"
     candidate.promoted_at = datetime.now(timezone.utc)
@@ -146,14 +155,16 @@ def rollback(
     version: str, db: Session = Depends(get_db),
     _: CurrentUser = Depends(require_role(*GATE_ROLES)),
 ) -> ModelVersionOut:
-    """One-action manual rollback (FR-L8). Does not itself revert fleet kiosks'
-    `current_model_version` — pair with a new rollout targeting the previous
-    champion's version (routers/fleet.py) to actually move traffic back.
+    """One-action manual rollback (FR-L8). The version's rollouts stop being served at
+    once, so each kiosk's next sync is handed the previous promoted rollout (or nothing)
+    and `current_model_version` is repointed (server/rollouts.py::retire).
     """
     model_version = db.get(ModelVersion, version)
     if model_version is None:
         raise HTTPException(status_code=404, detail="model version not found")
     model_version.status = "rolled_back"
+    # Stops serving the version's rollouts and repoints the fleet's recorded version.
+    retire(db, version)
     db.commit()
     db.refresh(model_version)
     return ModelVersionOut.model_validate(model_version)

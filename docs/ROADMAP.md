@@ -40,6 +40,27 @@ recruitment — but it means the gates below are **unmet**, not
   as plain PyTorch on CPU — no TensorRT conversion yet. "Runs on the board" is
   therefore a bring-up milestone, not the exit criterion. Do not tick Phase 0's
   perception box until the 20-minute hot measurement exists.
+- **Deployment hardening, 2026-10-12** (server + kiosk; tests added in
+  `server/tests/test_deployment_hardening.py` and `kiosk/tests/test_rollback_and_kb_sync.py`):
+  per-kiosk credentials (`SIGNOO_KIOSK_TOKEN_MODE=per_kiosk`); declined consent refused by
+  the server too; a rollback now actually withdraws a model (rollouts retire, kiosks revert
+  to their factory checkpoint — before this a kiosk kept running a model the server had
+  pulled); rollouts reach `completed`; one training run per language (DB lock, safe with
+  several workers); the benchmark can only be anchored on **enrolled** signers, never
+  anonymous kiosk visits; unreviewed clips are purged after 30 days and a session can be
+  erased; knowledge bases are per language and delivered to kiosks over the network, not by
+  a shared file; a language trained only on generated data is no longer pressable unless
+  `SIGNOO_ALLOW_SYNTHETIC=1`; `deploy/` holds a DigitalOcean setup (Docker Compose, Caddy,
+  Postgres, backups) that has **not been built or run yet**.
+  **Consequence worth reading twice:** with the benchmark rule above, the automatic cycle
+  cannot start from kiosk visits alone — it needs two enrolled, named signers from a
+  data-collection session. That moves data collection (Phase 0/1) from "ought to happen" to
+  a hard dependency of the learning loop, which is where the real-data gap above already was.
+  Still open from the same review: signer identity for returning visitors (needs opt-in
+  enrolment), landmarks stored as JSON in the database (object storage when volume demands),
+  `POST /training/trigger` trains inside the request, no automatic rollout halt on bad live
+  metrics, and the fleet record's single `language`/`current_model_version` beside the
+  per-language `model_versions`.
 - **No real signer data exists.** `data/` contains only `synthetic/`. `models/signoo.pt`
   is trained on synthetic data, not real LIU recordings. Phase 0's exit criteria
   (≥5 signers committed, consent pack approved) and Phase 1's (50 signs × 10 signers

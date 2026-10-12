@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>SIGNO — عرض المشروع</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+@page { size: 1280px 720px; margin: 0; }
+:root{
+  --navy:#0A1B33; --navy2:#12294A; --ink:#0F2037;
+  --teal:#13B5A6; --teal-d:#0E8F85; --mint:#E6F6F4;
+  --gold:#C9A24B; --gold-l:#F3E7C6;
+  --bg:#F6F8FB; --card:#FFFFFF; --line:#DCE3EC; --muted:#5B6B80;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#fff}
+body{font-family:'Cairo','Segoe UI',Tahoma,sans-serif;color:var(--ink);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.slide{width:1280px;height:720px;position:relative;overflow:hidden;page-break-after:always;break-after:page;background:var(--bg)}
+.slide:last-child{page-break-after:auto;break-after:auto}
+.latin{font-family:'Space Grotesk','Segoe UI',sans-serif;direction:ltr;unicode-bidi:isolate;letter-spacing:.02em}
+.dark{background:radial-gradient(1200px 700px at 85% 20%,#17407A 0%,var(--navy2) 38%,var(--navy) 100%);color:#fff}
+.pad{position:absolute;inset:0;padding:64px 80px}
+.eyebrow{display:inline-block;font-weight:700;font-size:15px;color:var(--teal-d);background:var(--mint);padding:5px 16px;border-radius:99px;margin-bottom:14px}
+.dark .eyebrow{color:var(--teal);background:rgba(19,181,166,.14)}
+h2{font-size:44px;font-weight:900;line-height:1.25;color:var(--navy)}
+.dark h2{color:#fff}
+h2 em{font-style:normal;color:var(--teal-d)}
+.dark h2 em{color:var(--teal)}
+.sub{font-size:19px;color:var(--muted);margin-top:8px;font-weight:400}
+.dark .sub{color:#B8C7DC}
+.foot{position:absolute;bottom:26px;inset-inline:80px;display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#8A98AB}
+.foot b{color:var(--navy);font-size:15px}
+.dark .foot b{color:#fff}
+.num{font-family:'Space Grotesk',sans-serif;direction:ltr}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;box-shadow:0 8px 24px rgba(10,27,51,.06)}
+.ico{width:54px;height:54px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(135deg,var(--teal),var(--teal-d))}
+.ico svg{width:28px;height:28px;stroke:#fff;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ico.gold{background:linear-gradient(135deg,#D9B666,var(--gold))}
+.card h3{font-size:22px;font-weight:700;color:var(--navy);margin:14px 0 6px}
+.card p{font-size:16.5px;line-height:1.7;color:var(--muted)}
+.glow{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5;pointer-events:none}
+.waves{position:absolute;inset:0;opacity:.35;pointer-events:none}
+</style>
+</head>
+<body>
+
+<!-- Reusable kiosk illustration -->
+<svg width="0" height="0" style="position:absolute">
+ <defs>
+  <linearGradient id="body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2A3A52"/><stop offset="1" stop-color="#0B1524"/></linearGradient>
+  <linearGradient id="scr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E9F4F3"/></linearGradient>
+  <linearGradient id="tealg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#13B5A6"/><stop offset="1" stop-color="#0E8F85"/></linearGradient>
+  <symbol id="kiosk" viewBox="0 0 260 520">
+   <ellipse cx="130" cy="500" rx="105" ry="14" fill="#000" opacity=".25"/>
+   <rect x="92" y="330" width="14" height="160" rx="3" fill="#18243A"/>
+   <rect x="154" y="330" width="14" height="160" rx="3" fill="#18243A"/>
+   <rect x="92" y="395" width="76" height="12" fill="#223250"/>
+   <rect x="40" y="484" width="180" height="16" rx="6" fill="url(#body)"/>
+   <rect x="20" y="10" width="220" height="340" rx="22" fill="url(#body)"/>
+   <rect x="20" y="10" width="220" height="340" rx="22" fill="none" stroke="#3B5379" stroke-width="2"/>
+   <rect x="100" y="22" width="60" height="9" rx="4.5" fill="#05090F"/>
+   <circle cx="130" cy="26.5" r="2.6" fill="#13B5A6"/>
+   <rect x="34" y="42" width="192" height="236" rx="10" fill="url(#scr)"/>
+   <g transform="translate(130 128)" fill="none" stroke="url(#tealg)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+     <path d="M-20 38 V-8 a7 7 0 0 1 14 0 V-22 a7 7 0 0 1 14 0 V-26 a7 7 0 0 1 14 0 V-18 a7 7 0 0 1 14 0 V22 c0 22 -14 38 -34 38 h-4 c-14 0 -24 -8 -32 -22 l-14 -24 a7 7 0 0 1 12 -7 l10 12"/>
+   </g>
+   <text x="130" y="224" text-anchor="middle" font-family="Space Grotesk,Segoe UI,sans-serif" font-weight="700" font-size="30" fill="#0A1B33" letter-spacing="2">SIGNO</text>
+   <rect x="82" y="238" width="96" height="4" rx="2" fill="#C9A24B"/>
+   <rect x="34" y="292" width="192" height="42" rx="8" fill="#0F1D33"/>
+   <circle cx="56" cy="313" r="5" fill="#13B5A6"/><rect x="70" y="308" width="110" height="5" rx="2.5" fill="#33496B"/><rect x="70" y="317" width="70" height="5" rx="2.5" fill="#26395A"/>
+  </symbol>
+ </defs>
+</svg>
+
+<!-- 1. COVER -->
+<section class="slide dark">
+  <div class="glow" style="width:520px;height:520px;background:#13B5A6;left:-120px;bottom:-200px;opacity:.28"></div>
+  <div class="glow" style="width:440px;height:440px;background:#C9A24B;right:120px;top:-180px;opacity:.18"></div>
+  <svg class="waves" viewBox="0 0 1280 720" preserveAspectRatio="none"><g fill="none" stroke="#5FD6CB" stroke-width="1">
+    <path d="M0 520 C220 440 380 640 640 560 S1000 440 1280 520" opacity=".5"/><path d="M0 560 C220 480 380 680 640 600 S1000 480 1280 560" opacity=".35"/><path d="M0 600 C220 520 380 720 640 640 S1000 520 1280 600" opacity=".2"/></g></svg>
+  <div class="pad" style="display:flex;align-items:center;justify-content:space-between;padding-inline:100px">
+    <div style="width:640px">
+      <div class="latin" style="font-size:98px;font-weight:700;line-height:1;background:linear-gradient(90deg,#fff,#8FE6DD);-webkit-background-clip:text;color:transparent">SIGNO</div>
+      <div style="width:90px;height:5px;border-radius:3px;background:var(--gold);margin:22px 0"></div>
+      <div style="font-size:44px;font-weight:900;line-height:1.3">الشاشة التفاعلية الذكية</div>
+      <p style="font-size:22px;line-height:1.8;color:#B8C7DC;margin-top:16px;font-weight:400">لكسر حواجز التواصل بلغة الإشارة — تمكين مستخدمي لغة الإشارة من خلال الذكاء الاصطناعي والابتكار التكنولوجي</p>
+      <div style="margin-top:34px;display:flex;gap:12px;font-size:15px;font-weight:600">
+        <span style="padding:8px 18px;border:1px solid rgba(255,255,255,.25);border-radius:99px">لغة الإشارة الأردنية</span>
+        <span style="padding:8px 18px;border:1px solid rgba(255,255,255,.25);border-radius:99px">عرض شراكة وتمويل</span>
+      </div>
+    </div>
+    <div style="position:relative;width:340px;height:620px">
+      <div class="glow" style="inset:80px 20px;background:#13B5A6;opacity:.45"></div>
+      <svg viewBox="0 0 260 520" style="position:relative;width:100%;height:100%"><use href="#kiosk"/></svg>
+    </div>
+  </div>
+</section>
+
+<!-- 2. OVERVIEW -->
+<section class="slide">
+  <div class="pad">
+    <span class="eyebrow">نظرة عامة</span>
+    <h2>نظرة عامة على مشروع <em class="latin">SIGNO</em></h2>
+    <p class="sub">الحل الذي يعيد تعريف التواصل بلغة الإشارة من خلال الذكاء الاصطناعي</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:26px;margin-top:44px">
+      <div class="card" style="padding:30px">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="16" rx="2"/><path d="M9 22h6M12 18v4"/><circle cx="12" cy="8" r="2"/></svg></div>
+        <h3>ما هو <span class="latin">SIGNO</span>؟</h3>
+        <p>كشك تفاعلي ذكي مزوّد بكاميرا وشاشة، يفهم لغة الإشارة بالذكاء الاصطناعي ويجيب بنص وصوت وبلغة الإشارة نفسها.</p>
+      </div>
+      <div class="card" style="padding:30px">
+        <div class="ico gold"><svg viewBox="0 0 24 24"><path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18v.01"/></svg></div>
+        <h3>المشكلة التي يحلها</h3>
+        <p>يزيل حواجز التواصل أمام مستخدمي لغة الإشارة في الخدمات العامة والتعليم والرعاية الصحية.</p>
+      </div>
+      <div class="card" style="padding:30px">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg></div>
+        <h3>التأثير والفوائد</h3>
+        <p>يعزز الشمولية، ويُمكّن الأفراد، ويسهّل الوصول إلى المعلومات والخدمات بشكل عادل.</p>
+      </div>
+    </div>
+    <div style="margin-top:34px;padding:20px 28px;border-radius:16px;background:var(--navy);color:#fff;font-size:19px;font-weight:600;display:flex;align-items:center;gap:14px">
+      <span style="width:6px;height:30px;border-radius:3px;background:var(--gold)"></span>نلتزم ببناء مجتمع أكثر شمولاً، حيث يمكن للجميع التواصل بسهولة وفعالية.
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">02</span></div>
+</section>
+
+<!-- 3. PROBLEM -->
+<section class="slide dark">
+  <div class="glow" style="width:480px;height:480px;background:#C9A24B;left:-160px;top:-160px;opacity:.16"></div>
+  <div class="pad">
+    <span class="eyebrow">المشكلة</span>
+    <h2>فجوة التواصل <em>ليست مجرد صعوبة</em></h2>
+    <p class="sub">إنها فجوة هيكلية تسبب إقصاءً مكانياً واجتماعياً يومياً</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:40px">
+      <div style="padding:26px 28px;border-radius:20px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12)">
+        <div class="num" style="font-size:15px;color:var(--gold);font-weight:700">01</div>
+        <div style="font-size:23px;font-weight:700;margin:6px 0">الوصول الطبي</div>
+        <div style="font-size:16.5px;line-height:1.7;color:#B8C7DC">تأخر التواصل في الحالات الطبية قد يؤدي إلى مخاطر حقيقية على الصحة والحياة.</div>
+      </div>
+      <div style="padding:26px 28px;border-radius:20px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12)">
+        <div class="num" style="font-size:15px;color:var(--gold);font-weight:700">02</div>
+        <div style="font-size:23px;font-weight:700;margin:6px 0">الخصوصية</div>
+        <div style="font-size:16.5px;line-height:1.7;color:#B8C7DC">اضطرار مستخدم لغة الإشارة للاعتماد على أفراد عائلته في المعاملات الحساسة.</div>
+      </div>
+      <div style="padding:26px 28px;border-radius:20px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12)">
+        <div class="num" style="font-size:15px;color:var(--gold);font-weight:700">03</div>
+        <div style="font-size:23px;font-weight:700;margin:6px 0">الاستقلالية</div>
+        <div style="font-size:16.5px;line-height:1.7;color:#B8C7DC">المهام اليومية، كالسفر والوصول إلى الخدمات الحكومية، تصبح عبئاً نفسياً ثقيلاً.</div>
+      </div>
+      <div style="padding:26px 28px;border-radius:20px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12)">
+        <div class="num" style="font-size:15px;color:var(--gold);font-weight:700">04</div>
+        <div style="font-size:23px;font-weight:700;margin:6px 0">محدودية المترجم البشري</div>
+        <div style="font-size:16.5px;line-height:1.7;color:#B8C7DC">من المستحيل عملياً توفير مترجم لغة إشارة على مدار الساعة في كل المرافق.</div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">03</span></div>
+</section>
+
+<!-- 4. SOLUTION -->
+<section class="slide">
+  <div class="pad" style="display:flex;gap:60px;align-items:center">
+    <div style="flex:1">
+      <span class="eyebrow">الحل الذكي</span>
+      <h2><em class="latin">SIGNO</em><br>كشك يفهم ويجيب بلغتك</h2>
+      <p class="sub" style="max-width:560px;line-height:1.8">كاميرا عالية الدقة وشاشة عرض، تعتمدان على الذكاء الاصطناعي وتقنيات الرؤية الحاسوبية.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:34px">
+        <div class="card" style="padding:20px 22px"><h3 style="margin:0 0 4px;font-size:20px">متاح دائماً</h3><p style="font-size:15.5px">على مدار الساعة، دون موعد أو انتظار مترجم.</p></div>
+        <div class="card" style="padding:20px 22px"><h3 style="margin:0 0 4px;font-size:20px">استقلالية تامة</h3><p style="font-size:15.5px">وخصوصية كاملة دون وسيط.</p></div>
+        <div class="card" style="padding:20px 22px"><h3 style="margin:0 0 4px;font-size:20px">واجهة طبيعية</h3><p style="font-size:15.5px">بدون قفازات أو حساسات معقدة.</p></div>
+        <div class="card" style="padding:20px 22px"><h3 style="margin:0 0 4px;font-size:20px">دمج عكسي</h3><p style="font-size:15.5px">يثقّف المجتمع حول لغة الإشارة.</p></div>
+      </div>
+    </div>
+    <div style="width:380px;height:600px;border-radius:32px;background:linear-gradient(160deg,var(--navy2),var(--navy));position:relative;display:grid;place-items:center;overflow:hidden">
+      <div class="glow" style="width:300px;height:300px;background:#13B5A6;opacity:.5"></div>
+      <svg viewBox="0 0 260 520" style="position:relative;width:260px;height:520px"><use href="#kiosk"/></svg>
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">04</span></div>
+</section>
+
+<!-- 5. HOW IT WORKS -->
+<section class="slide">
+  <div class="pad">
+    <span class="eyebrow">آلية العمل</span>
+    <h2>كيف يعمل <em class="latin">SIGNO</em>؟</h2>
+    <p class="sub">عملية بسيطة وطبيعية في ثلاث خطوات</p>
+    <div style="position:relative;margin-top:70px;display:grid;grid-template-columns:repeat(3,1fr);gap:30px">
+      <div style="position:absolute;top:44px;inset-inline:12%;height:3px;background:repeating-linear-gradient(90deg,var(--teal) 0 10px,transparent 10px 20px)"></div>
+      <div style="text-align:center;position:relative">
+        <div style="width:90px;height:90px;border-radius:50%;margin:0 auto;background:linear-gradient(135deg,var(--teal),var(--teal-d));display:grid;place-items:center;box-shadow:0 0 0 10px var(--mint)">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+        <div class="num" style="color:var(--gold);font-weight:700;margin-top:22px">01</div>
+        <div style="font-size:26px;font-weight:800;margin:4px 0 8px">التقاط ذكي</div>
+        <p style="font-size:17px;color:var(--muted);line-height:1.7">يقف المستخدم أمام الكاميرا<br>ويتحدث بلغته</p>
+      </div>
+      <div style="text-align:center;position:relative">
+        <div style="width:90px;height:90px;border-radius:50%;margin:0 auto;background:linear-gradient(135deg,#1E4E8C,var(--navy2));display:grid;place-items:center;box-shadow:0 0 0 10px #E3EBF6">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4"/></svg></div>
+        <div class="num" style="color:var(--gold);font-weight:700;margin-top:22px">02</div>
+        <div style="font-size:26px;font-weight:800;margin:4px 0 8px">معالجة بالذكاء الاصطناعي</div>
+        <p style="font-size:17px;color:var(--muted);line-height:1.7">تحلّل الرؤية الحاسوبية<br>حركة اليدين والوجه</p>
+      </div>
+      <div style="text-align:center;position:relative">
+        <div style="width:90px;height:90px;border-radius:50%;margin:0 auto;background:linear-gradient(135deg,#D9B666,var(--gold));display:grid;place-items:center;box-shadow:0 0 0 10px var(--gold-l)">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+        <div class="num" style="color:var(--gold);font-weight:700;margin-top:22px">03</div>
+        <div style="font-size:26px;font-weight:800;margin:4px 0 8px">استجابة متعددة</div>
+        <p style="font-size:17px;color:var(--muted);line-height:1.7">أفاتار يردّ بلغة الإشارة،<br>مع نص مكتوب وصوت</p>
+      </div>
+    </div>
+    <div style="margin-top:52px;padding:18px 26px;border-radius:16px;background:var(--mint);border:1px solid #BFE6E1;font-size:17px;color:#0B5F58;font-weight:600">
+      الأفاتار يعرض حركات مسجّلة من مُشيرين حقيقيين، ولا يولّد إشارات من تلقاء نفسه — لأن الخطأ في الإشارة لا يستطيع المستخدم اكتشافه.
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">05</span></div>
+</section>
+
+<!-- 6. JOURNEY -->
+<section class="slide dark">
+  <div class="glow" style="width:500px;height:500px;background:#13B5A6;right:-160px;bottom:-200px;opacity:.25"></div>
+  <div class="pad">
+    <span class="eyebrow">تجربة المستخدم</span>
+    <h2>تجربة طبيعية… <em>بدون تعقيد</em></h2>
+    <p class="sub">رحلة المستخدم من البداية إلى النهاية</p>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-top:56px">
+      <div style="padding:26px 18px;border-radius:20px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);text-align:center"><div class="num" style="font-size:44px;font-weight:700;color:var(--teal)">1</div><div style="font-size:20px;font-weight:700;margin:8px 0">الاقتراب بثقة</div><div style="font-size:15px;color:#B8C7DC;line-height:1.7">يقترب من الكشك باطمئنان</div></div>
+      <div style="padding:26px 18px;border-radius:20px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);text-align:center"><div class="num" style="font-size:44px;font-weight:700;color:var(--teal)">2</div><div style="font-size:20px;font-weight:700;margin:8px 0">التواصل الطبيعي</div><div style="font-size:15px;color:#B8C7DC;line-height:1.7">يستخدم لغة الإشارة كما يفعل دائماً</div></div>
+      <div style="padding:26px 18px;border-radius:20px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);text-align:center"><div class="num" style="font-size:44px;font-weight:700;color:var(--teal)">3</div><div style="font-size:20px;font-weight:700;margin:8px 0">الفهم</div><div style="font-size:15px;color:#B8C7DC;line-height:1.7">الذكاء الاصطناعي يتعرّف على الإشارة</div></div>
+      <div style="padding:26px 18px;border-radius:20px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);text-align:center"><div class="num" style="font-size:44px;font-weight:700;color:var(--teal)">4</div><div style="font-size:20px;font-weight:700;margin:8px 0">الاستجابة الواضحة</div><div style="font-size:15px;color:#B8C7DC;line-height:1.7">يقدّم الرد بوضوح بالإشارة والنص</div></div>
+      <div style="padding:26px 18px;border-radius:20px;background:linear-gradient(160deg,#D9B666,#B8903B);color:#2A1E04;text-align:center"><div class="num" style="font-size:44px;font-weight:700">5</div><div style="font-size:20px;font-weight:800;margin:8px 0">الإنجاز المستقل</div><div style="font-size:15px;line-height:1.7">ينجز مهمته باستقلالية تامة</div></div>
+    </div>
+    <div style="margin-top:44px;text-align:center;font-size:19px;font-weight:600;color:#fff;letter-spacing:.02em">لا قفازات إلكترونية &nbsp;•&nbsp; لا حساسات معقدة &nbsp;•&nbsp; لا إجراءات غير ضرورية</div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">06</span></div>
+</section>
+
+<!-- 7. IMPACT -->
+<section class="slide">
+  <div class="pad">
+    <span class="eyebrow">الأثر</span>
+    <h2>تكنولوجيا <em>بأثر إنساني</em></h2>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:22px;margin-top:46px">
+      <div class="card" style="padding:28px 24px">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="7" r="4"/><path d="M5 22v-2a5 5 0 0 1 5-5h4a5 5 0 0 1 5 5v2"/></svg></div>
+        <h3>الاستقلالية</h3><p>تمكين مستخدمي لغة الإشارة من إدارة احتياجاتهم بأنفسهم بثقة تامة.</p></div>
+      <div class="card" style="padding:28px 24px">
+        <div class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+        <h3>الخصوصية</h3><p>تقليل الحاجة إلى وسيط في المحادثات والمعاملات المالية والقانونية الحساسة.</p></div>
+      <div class="card" style="padding:28px 24px">
+        <div class="ico"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6M16 14c3 0 6 1.8 6 5"/></svg></div>
+        <h3>الدمج المجتمعي</h3><p>جعل الأماكن العامة أكثر سهولة وترحيباً بالجميع دون تمييز.</p></div>
+      <div class="card" style="padding:28px 24px">
+        <div class="ico gold"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></div>
+        <h3>قاعدة بيانات وطنية</h3><p>بناء أول قاعدة بيانات مدقَّقة للغة الإشارة الأردنية لدعم تطوير الذكاء الاصطناعي.</p></div>
+    </div>
+    <div style="margin-top:30px;padding:20px 28px;border-radius:16px;background:var(--navy);color:#fff;font-size:17.5px;line-height:1.8">
+      <b style="color:var(--gold)">الخصوصية بالتصميم:</b> لا يُحتفظ بالفيديو افتراضياً، بل بنقاط حركة اليدين والوجه فقط، ولا يُحفظ إلا بموافقة صريحة ولمدة محددة.
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">07</span></div>
+</section>
+
+<!-- 8. WHERE -->
+<section class="slide">
+  <div class="pad">
+    <span class="eyebrow">مجالات التطبيق</span>
+    <h2>أين يمكن لـ <em class="latin">SIGNO</em> أن يصنع فرقاً؟</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:40px">
+      <div class="card" style="padding:28px 30px;display:flex;gap:22px;align-items:flex-start">
+        <div class="ico" style="flex:none;width:64px;height:64px"><svg viewBox="0 0 24 24" style="width:32px;height:32px"><path d="M3 21V8l9-5 9 5v13M9 21v-6h6v6M12 8v4M10 10h4"/></svg></div>
+        <div><h3 style="margin:0 0 6px">المستشفيات والمراكز الطبية</h3><p>إرشاد المرضى إلى الطوارئ والعيادات بسرعة، حيث قد يكون كل دقيقة مهمة.</p></div></div>
+      <div class="card" style="padding:28px 30px;display:flex;gap:22px;align-items:flex-start">
+        <div class="ico" style="flex:none;width:64px;height:64px;background:linear-gradient(135deg,#1E4E8C,var(--navy2))"><svg viewBox="0 0 24 24" style="width:32px;height:32px"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg></div>
+        <div><h3 style="margin:0 0 6px">المطارات ومحطات السفر</h3><p>مساعدة المسافرين في معرفة بوابات المغادرة ومناطق استلام الأمتعة.</p></div></div>
+      <div class="card" style="padding:28px 30px;display:flex;gap:22px;align-items:flex-start">
+        <div class="ico gold" style="flex:none;width:64px;height:64px"><svg viewBox="0 0 24 24" style="width:32px;height:32px"><path d="M3 10 12 3l9 7M5 10v9M9.5 10v9M14.5 10v9M19 10v9M3 21h18"/></svg></div>
+        <div><h3 style="margin:0 0 6px">الدوائر الحكومية</h3><p>توجيه المراجعين نحو المكاتب وإتمام معاملاتهم بخصوصية تامة.</p></div></div>
+      <div class="card" style="padding:28px 30px;display:flex;gap:22px;align-items:flex-start">
+        <div class="ico" style="flex:none;width:64px;height:64px"><svg viewBox="0 0 24 24" style="width:32px;height:32px"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg></div>
+        <div><h3 style="margin:0 0 6px">البنوك والخدمات المالية</h3><p>تمكين العملاء من إجراء معاملاتهم المالية باستقلالية وسرّية.</p></div></div>
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">08</span></div>
+</section>
+
+<!-- 9. ROADMAP -->
+<section class="slide dark">
+  <div class="glow" style="width:520px;height:520px;background:#13B5A6;left:-200px;top:-200px;opacity:.22"></div>
+  <div class="pad">
+    <span class="eyebrow">خارطة الطريق</span>
+    <h2>نحو <em>التنفيذ</em></h2>
+    <p class="sub">ثلاث مراحل استراتيجية لتحويل الرؤية إلى واقع ملموس</p>
+    <div style="position:relative;margin-top:60px">
+      <div style="position:absolute;top:19px;inset-inline:6%;height:3px;background:linear-gradient(90deg,var(--teal),var(--gold))"></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:28px">
+        <div>
+          <div style="width:40px;height:40px;border-radius:50%;background:var(--teal);color:#06231F;display:grid;place-items:center;font-weight:900;position:relative;margin-inline-start:6%" class="num">1</div>
+          <div style="margin-top:22px;padding:26px 26px;border-radius:20px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);min-height:230px">
+            <div style="color:var(--teal);font-weight:700;font-size:15px">المرحلة الأولى</div>
+            <div style="font-size:24px;font-weight:800;margin:6px 0 10px">البحث والتطوير</div>
+            <div style="font-size:16px;line-height:1.8;color:#B8C7DC">بناء وتدقيق قاعدة بيانات لغة الإشارة الأردنية بالتعاون مع الخبراء والمُشيرين، وتدريب نماذج الذكاء الاصطناعي عليها.</div></div></div>
+        <div>
+          <div style="width:40px;height:40px;border-radius:50%;background:#7FBF8A;color:#06231F;display:grid;place-items:center;font-weight:900;margin-inline-start:6%" class="num">2</div>
+          <div style="margin-top:22px;padding:26px 26px;border-radius:20px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);min-height:230px">
+            <div style="color:#9BD6A5;font-weight:700;font-size:15px">المرحلة الثانية</div>
+            <div style="font-size:24px;font-weight:800;margin:6px 0 10px">النموذج الأولي <span class="latin">MVP</span></div>
+            <div style="font-size:16px;line-height:1.8;color:#B8C7DC">تصنيع كشك تجريبي واختبار النظام في بيئة محكومة، وجمع ملاحظات المستخدمين.</div></div></div>
+        <div>
+          <div style="width:40px;height:40px;border-radius:50%;background:var(--gold);color:#2A1E04;display:grid;place-items:center;font-weight:900;margin-inline-start:6%" class="num">3</div>
+          <div style="margin-top:22px;padding:26px 26px;border-radius:20px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);min-height:230px">
+            <div style="color:var(--gold);font-weight:700;font-size:15px">المرحلة الثالثة</div>
+            <div style="font-size:24px;font-weight:800;margin:6px 0 10px">الإطلاق الرسمي</div>
+            <div style="font-size:16px;line-height:1.8;color:#B8C7DC">تركيب الأكشاك في النقاط الحيوية وإطلاق حملة تعريفية بالخدمة.</div></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">09</span></div>
+</section>
+
+<!-- 10. VISION -->
+<section class="slide">
+  <div class="pad" style="display:flex;gap:56px;align-items:center">
+    <div style="flex:1">
+      <span class="eyebrow">الرؤية المستقبلية</span>
+      <h2>من كشك ذكي إلى <em>منظومة رقمية متكاملة</em></h2>
+      <div style="margin-top:38px;display:flex;flex-direction:column;gap:16px">
+        <div class="card" style="padding:20px 24px;display:flex;gap:20px;align-items:center"><div class="ico" style="flex:none"><svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></div><div><h3 style="margin:0 0 2px;font-size:21px">التكامل مع الهواتف الذكية</h3><p style="font-size:15.5px">مسح رمز <span class="latin">QR</span> لنقل التوجيهات والمعلومات إلى هاتف المستخدم.</p></div></div>
+        <div class="card" style="padding:20px 24px;display:flex;gap:20px;align-items:center"><div class="ico gold" style="flex:none"><svg viewBox="0 0 24 24"><path d="M5 13V8a2 2 0 0 1 4 0v3M9 11V6a2 2 0 0 1 4 0v5M13 11V7a2 2 0 0 1 4 0v6c0 4-2 7-6 7-3 0-5-2-6-4"/></svg></div><div><h3 style="margin:0 0 2px;font-size:21px">التوسع في لغات الإشارة</h3><p style="font-size:15.5px">لغة إشارة لكل بطاقة لغة، ولكل منها نموذجها ومكتبتها المستقلة — لأن لغات الإشارة لغات مستقلة وليست ترجمة بعضها.</p></div></div>
+        <div class="card" style="padding:20px 24px;display:flex;gap:20px;align-items:center"><div class="ico" style="flex:none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div><div><h3 style="margin:0 0 2px;font-size:21px">الانتشار العالمي</h3><p style="font-size:15.5px">التوسع مستقبلاً إلى المطارات والمرافق الحيوية حول العالم.</p></div></div>
+      </div>
+    </div>
+    <div style="width:420px;height:560px;border-radius:32px;background:radial-gradient(circle at 50% 40%,#17407A,var(--navy));position:relative;overflow:hidden">
+      <svg viewBox="0 0 420 560" style="position:absolute;inset:0">
+        <g fill="none" stroke="#5FD6CB" stroke-width="1.2" opacity=".55">
+          <ellipse cx="210" cy="280" rx="170" ry="170"/><ellipse cx="210" cy="280" rx="170" ry="70"/><ellipse cx="210" cy="280" rx="70" ry="170"/><path d="M40 280h340"/>
+        </g>
+        <g fill="#13B5A6"><circle cx="148" cy="190" r="6"/><circle cx="262" cy="170" r="5"/><circle cx="300" cy="260" r="7"/><circle cx="170" cy="330" r="5"/><circle cx="250" cy="370" r="6"/><circle cx="110" cy="270" r="4"/></g>
+        <g stroke="#C9A24B" stroke-width="1.5" fill="none" opacity=".9"><path d="M148 190 Q210 120 262 170"/><path d="M262 170 Q320 200 300 260"/><path d="M300 260 Q290 330 250 370"/><path d="M148 190 Q100 230 110 270"/><path d="M110 270 Q130 320 170 330"/></g>
+        <circle cx="300" cy="260" r="14" fill="none" stroke="#C9A24B" stroke-width="2"/>
+      </svg>
+      <div class="latin" style="position:absolute;bottom:30px;inset-inline:0;text-align:center;color:#fff;font-weight:700;font-size:26px">SIGNO &nbsp;·&nbsp; <span style="color:var(--gold)">JSL</span> → <span style="color:var(--teal)">more</span></div>
+    </div>
+  </div>
+  <div class="foot"><b class="latin">SIGNO</b><span class="num">10</span></div>
+</section>
+
+<!-- 11. PARTNERS / CLOSING -->
+<section class="slide dark">
+  <div class="glow" style="width:560px;height:560px;background:#13B5A6;right:-180px;bottom:-240px;opacity:.28"></div>
+  <div class="glow" style="width:420px;height:420px;background:#C9A24B;left:-140px;top:-160px;opacity:.16"></div>
+  <div class="pad" style="display:flex;gap:70px;align-items:center;padding-inline:100px">
+    <div style="flex:1.15">
+      <span class="eyebrow">الشراكات</span>
+      <h2 style="font-size:40px">نبني مستقبلاً <em>أكثر شمولاً… معاً</em></h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:36px">
+        <div style="padding:20px 22px;border-radius:18px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14)"><div style="font-size:19px;font-weight:700;color:var(--teal)">الجهات المتخصصة</div><div style="font-size:15px;line-height:1.7;color:#B8C7DC;margin-top:4px">المجلس الأعلى لحقوق الأشخاص ذوي الإعاقة والاتحادات المعنية</div></div>
+        <div style="padding:20px 22px;border-radius:18px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14)"><div style="font-size:19px;font-weight:700;color:var(--teal)">المؤسسات الحكومية</div><div style="font-size:15px;line-height:1.7;color:#B8C7DC;margin-top:4px">وزارة الاقتصاد الرقمي والريادة، وإدارة المطارات والمنافذ الحدودية</div></div>
+        <div style="padding:20px 22px;border-radius:18px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14)"><div style="font-size:19px;font-weight:700;color:var(--gold)">المنظمات الدولية</div><div style="font-size:15px;line-height:1.7;color:#B8C7DC;margin-top:4px">المنظمات الداعمة للدمج الشامل مثل <span class="latin">UNDP</span> &nbsp;و&nbsp; <span class="latin">UNICEF</span></div></div>
+        <div style="padding:20px 22px;border-radius:18px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14)"><div style="font-size:19px;font-weight:700;color:var(--gold)">القطاع الخاص</div><div style="font-size:15px;line-height:1.7;color:#B8C7DC;margin-top:4px">شركات الاتصالات والتكنولوجيا والبنوك الكبرى المهتمة بمبادرات المسؤولية المجتمعية</div></div>
+      </div>
+    </div>
+    <div style="flex:.85;text-align:center">
+      <div class="latin" style="font-size:84px;font-weight:700;line-height:1;background:linear-gradient(90deg,#fff,#8FE6DD);-webkit-background-clip:text;color:transparent">SIGNO</div>
+      <div style="width:70px;height:4px;border-radius:2px;background:var(--gold);margin:20px auto"></div>
+      <div style="font-size:19px;font-weight:600;color:#D5E0EE;line-height:1.9">الذكاء الاصطناعي<br>سهولة الوصول<br>الدمج<br>الابتكار</div>
+      <div style="margin-top:30px;padding:14px 22px;border-radius:99px;border:1px solid var(--gold);color:var(--gold);font-weight:700;font-size:17px;display:inline-block">لنبدأ المرحلة الأولى معاً</div>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

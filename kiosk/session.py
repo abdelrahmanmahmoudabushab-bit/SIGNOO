@@ -105,7 +105,11 @@ def read_temperature_c(root: str = "/sys/class/thermal") -> float | None:
     for path in Path(root).glob("thermal_zone*/temp"):
         try:
             temps.append(int(path.read_text().strip()) / 1000)
-        except (OSError, ValueError):
+        except (OSError, ValueError, TypeError):
+            # TypeError: on the Jetson (Python 3.10) a thermal zone with no sensor behind
+            # it can return nothing from read(), and the decoder fails with
+            # "can't concat NoneType to bytes" instead of raising OSError. One dead zone
+            # must not take /health and the heartbeat down with it.
             continue
     return max(temps) if temps else None
 

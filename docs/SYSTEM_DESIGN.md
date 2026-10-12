@@ -97,12 +97,20 @@ the selected language's own knowledge base.
 **Where the code does not yet meet this rule** (read on 2026-10-11; each is repeated in
 the block it belongs to):
 
-- `liu` is marked `"status": "live"` with `"real_data": false` and runs
-  `models/signoo.pt`, a model trained on synthetic data. Readiness in
-  `kiosk/languages.py` checks only that the model and vocabulary load, not `real_data`.
-  This breaks the rule that a language without real training data says "coming soon".
-- The server's knowledge base (B14) has no language field. It is one table written to
-  one file, `kiosk/data/knowledge_base.json`, which is the `liu` engine's file.
+- **Fixed 2026-10-12:** `liu` is marked `"status": "live"` with `"real_data": false` and
+  runs `models/signoo.pt`, a model trained on synthetic data. A language is now pressable
+  only if it is `selectable` (`kiosk/languages.py`): its model and vocabulary load **and**
+  it was trained on real people, unless the deployment sets `SIGNOO_ALLOW_SYNTHETIC=1`.
+  `GET /languages` reports `ready` as that answer and `model_loaded` separately. The
+  consequence is deliberate: a production kiosk shows `liu` as "coming soon" until real
+  signer data exists. The kiosk test suite and a dev machine opt in explicitly. (The
+  `core/languages.json` `status` value `"live"` for `liu` is still wrong by the same rule
+  and should become `"pilot"` or `"coming_soon"`; it is data, not changed here.)
+- **Fixed 2026-10-12:** the server's knowledge base (B14) had no language field. Entries
+  now carry a `language`, are checked against that language's own vocabulary and clip
+  library, are written to that language's own file named in `core/languages.json`, and are
+  delivered to a kiosk per language over the network (`GET /fleet/kiosks/{id}/kb`,
+  `kiosk/kb_sync.py`). A language with no `knowledge_base` file listed refuses new entries.
 - The server's fleet record (B15) still holds one `language` and one
   `current_model_version` per kiosk beside the new per-language `model_versions`, and
   the kiosk always registers as `liu`. Per-language model distribution is being built

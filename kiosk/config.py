@@ -66,6 +66,22 @@ class Config:
         default_factory=lambda: _env_int("SIGNOO_MIN_UTTERANCE_FRAMES", 6)
     )
 
+    # A word is closed and emitted at this many buffered frames even if the hands never
+    # pause, so a visitor (or anything else on the socket) cannot grow one without
+    # limit. About 6 s at the ~7.5 frames/s the browser sends (assets/app.js).
+    max_utterance_frames: int = field(
+        default_factory=lambda: _env_int("SIGNOO_MAX_UTTERANCE_FRAMES", 45)
+    )
+
+    # B1/B2 input limits for one "frame" message, checked before anything is decoded.
+    # The browser sends 960x720 JPEG at quality 0.6, well under both.
+    max_frame_b64_chars: int = field(
+        default_factory=lambda: _env_int("SIGNOO_MAX_FRAME_B64_CHARS", 300_000)
+    )
+    max_frame_pixels: int = field(
+        default_factory=lambda: _env_int("SIGNOO_MAX_FRAME_PIXELS", 1280 * 720)
+    )
+
     # B7 Dialogue
     knowledge_base_path: Path = field(
         default_factory=lambda: Path(
@@ -125,6 +141,26 @@ class Config:
         default_factory=lambda: _env_float("SIGNOO_HEARTBEAT_INTERVAL_S", 30.0)
     )
 
+    # Where models the server rolls out are installed, with installed.json recording
+    # which version each language runs (kiosk/model_sync.py). Factory checkpoints are
+    # never written here.
+    synced_models_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("SIGNOO_SYNCED_MODELS_DIR", str(REPO_ROOT / "models" / "fleet"))
+        )
+    )
+
+    # Knowledge bases the server delivers (kiosk/kb_sync.py), one file per language. Kept
+    # beside the synced models and never inside the source-controlled kiosk/data/.
+    @property
+    def synced_kb_dir(self) -> Path:
+        return self.synced_models_dir / "kb"
+
+    # A language whose model was trained only on generated data ("real_data": false in
+    # core/languages.json) is refused to visitors unless this is on. Off in a deployment;
+    # a development machine or a demo with no real signer data yet sets it to 1.
+    allow_synthetic: bool = field(default_factory=lambda: _env_bool("SIGNOO_ALLOW_SYNTHETIC", False))
+
     # Perception — every second captured frame, per SYSTEM_DESIGN.md B2 budget.
     perception_stride: int = field(default_factory=lambda: _env_int("SIGNOO_PERCEPTION_STRIDE", 2))
 
@@ -138,4 +174,5 @@ SEGMENTATION_DEFAULTS = {
     "motion_threshold": CONFIG.segmentation_motion_threshold,
     "hands_absent_ms": CONFIG.segmentation_hands_absent_ms,
     "min_frames": CONFIG.min_utterance_frames,
+    "max_frames": CONFIG.max_utterance_frames,
 }
