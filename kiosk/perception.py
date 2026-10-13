@@ -9,8 +9,9 @@ asynchronous (`detect_async`, a `result_callback`) rather than blocking per call
 which matters once frames are arriving faster than inference can keep up (the
 whole reason B1's single-slot buffer exists).
 
-Runs every second processed frame (`perception_stride`), matching the 30 fps
-budget in SYSTEM_DESIGN.md §4.1 — the largest single item there.
+Runs on every `perception_stride`th frame (1 = all of them; see kiosk/config.py for why).
+MediaPipe is the largest single item in the latency budget (SYSTEM_DESIGN.md §4.1) and
+on the Jetson's CPU it sustains about 10 frames a second.
 
 Camera capture itself lives in the browser (`getUserMedia`); this module never
 touches `cv2.VideoCapture`. It degrades to a clear, typed error rather than a
@@ -24,6 +25,7 @@ import logging
 import sys
 import threading
 import urllib.request
+import weakref
 from pathlib import Path
 
 import numpy as np
@@ -53,13 +55,116 @@ def _points(landmark_list, n: int) -> np.ndarray | None:
     return np.array([[p.x, p.y, p.z] for p in landmark_list[:n]], dtype=np.float32)
 
 
+# Output streams that are legitimately absent on a frame: nobody's hands are up, or the
+# person has stepped out of frame. `name.endswith("world_landmarks")` streams carry a
+# LandmarkList, the rest a NormalizedLandmarkList.
+_OPTIONAL_STREAMS = (
+    "pose_landmarks", "pose_world_landmarks",
+    "left_hand_landmarks", "left_hand_world_landmarks",
+    "right_hand_landmarks", "right_hand_world_landmarks",
+)
+
+
+def fill_empty_streams(output_packets, make_empty):
+    """Copy of MediaPipe's per-frame output packets with every empty optional stream
+    replaced by `make_empty(stream_name)`, a packet holding an empty landmark list.
+
+    Why: MediaPipe 0.10.18's holistic LIVE_STREAM callback checks only the *face* stream
+    for emptiness, then reads the pose and both hand streams unconditionally. A person who
+    is in view with their hands down is the normal state of a kiosk waiting for a visitor
+    to sign, and it makes the C++ side hit `Check failed: holder_ != nullptr The packet is
+    empty`, which is an abort: the whole backend process dies, not an exception we could
+    catch. A filled stream reads as "nothing detected", which is the truth.
+    """
+    filled = dict(output_packets)
+    for name in _OPTIONAL_STREAMS:
+        packet = filled.get(name)
+        if packet is not None and packet.is_empty():
+            filled[name] = make_empty(name)
+    return filled
+
+
+def install_empty_packet_guard() -> bool:
+    """Applies `fill_empty_streams` to the installed MediaPipe's result builder. Only for
+    the 0.10.x line that has the bug (the Jetson ships 0.10.18); 1.x does not need it, and
+    anything that cannot be imported is left alone. Returns whether the guard is in place."""
+    try:
+        import mediapipe as mp
+        from mediapipe.framework.formats import landmark_pb2
+        from mediapipe.tasks.python.vision import holistic_landmarker as holistic
+    except ImportError:
+        return False
+    if not mp.__version__.startswith("0.10."):
+        return False
+    if getattr(holistic, "_signoo_guarded", False):
+        return True
+    # The guard reaches into a private name. If a MediaPipe 0.10.x release renames it, say so
+    # loudly and carry on unguarded, rather than failing to start a kiosk that may not need it.
+    original = getattr(holistic, "_build_landmarker_result", None)
+    packet_creator = getattr(holistic, "packet_creator", None)
+    if original is None or packet_creator is None:
+        logger.warning("mediapipe_empty_packet_guard_not_installed",
+                       extra={"mediapipe": mp.__version__,
+                              "why": "internal names changed; a hands-down frame may abort the backend"})
+        return False
+
+    def make_empty(name: str):
+        proto = landmark_pb2.LandmarkList() if name.endswith("world_landmarks") \
+            else landmark_pb2.NormalizedLandmarkList()
+        return packet_creator.create_proto(proto)
+
+    # `packets_callback` looks this name up in the module on every frame, so replacing the
+    # module attribute is enough; nothing needs to be re-created.
+    holistic._build_landmarker_result = lambda output_packets: original(
+        fill_empty_streams(output_packets, make_empty))
+    holistic._signoo_guarded = True
+    logger.info("mediapipe_empty_packet_guard_installed", extra={"mediapipe": mp.__version__})
+    return True
+
+
+class _ResultNotifier:
+    """Who to tell when a tracking result arrives. A separate small object, so that the
+    tracker's callback holds this and not the perception: see the note on reference cycles
+    where the callback is built."""
+
+    def __init__(self) -> None:
+        self.listener = None
+
+    def fire(self) -> None:
+        listener = self.listener
+        if listener is None:
+            return
+        try:
+            listener()
+        except Exception:
+            # This runs on MediaPipe's thread; an exception escaping here would land in
+            # its C++ callback machinery. A listener that fails loses a notification.
+            logger.exception("perception_listener_failed")
+
+
+def _close_quietly(landmarker) -> None:
+    try:
+        landmarker.close()
+    except Exception:
+        logger.exception("landmarker_close_failed")
+
+
+def _close_outside_the_collector(landmarker) -> None:
+    """Runs when a `HolisticPerception` is freed without having been closed. It may be
+    running inside the cycle collector, where closing deadlocks, so the close is handed to
+    a thread of its own."""
+    logger.warning("perception_dropped_without_close")
+    threading.Thread(target=_close_quietly, args=(landmarker,), name="perception-close",
+                     daemon=True).start()
+
+
 class HolisticPerception:
     """One instance per active WebSocket session — MediaPipe tracking state must
     not bleed between visitors, same reasoning as `ml/extract_landmarks.py`'s "a
     fresh landmarker per clip, deliberately".
     """
 
-    def __init__(self, stride: int = 2, ensure_model: bool = True):
+    def __init__(self, stride: int = 1, ensure_model: bool = True):
         self.stride = max(1, stride)
         self._frame_index = 0
         self._result_buffer: SingleSlotBuffer[Landmarks] = SingleSlotBuffer()
@@ -67,7 +172,26 @@ class HolisticPerception:
         self._start_ms = None
         self._lock = threading.Lock()
         self._cv2 = None
+        self.brightness: float | None = None   # 0 (black) .. 255 (white); None until a frame arrives
+        self._notifier = _ResultNotifier()
         self._build(ensure_model)
+
+    def set_listener(self, listener) -> None:
+        """`listener()` is called, on MediaPipe's own thread, each time a tracking result
+        has been put in the buffer; pass None to stop. It must only signal: the caller
+        collects the result with `latest()` on its own thread.
+
+        Without this a result sat in the buffer until the *next* frame happened to arrive
+        and ask for it. That costs a frame of delay on every hand position, and when two
+        results finish between two frames the older one is overwritten unread: measured
+        2026-10-13, hand positions reached the browser 4 times a second from a tracker
+        producing 7."""
+        self._notifier.listener = listener
+
+    @property
+    def dropped_results(self) -> int:
+        """Tracking results overwritten in the buffer before anyone read them."""
+        return self._result_buffer.dropped
 
     def _build(self, ensure_model: bool) -> None:
         try:
@@ -96,6 +220,15 @@ class HolisticPerception:
 
         self._cv2 = cv2
         self._mp = mp
+        install_empty_packet_guard()
+
+        # The callback holds the buffer, not `self`. Holding `self` would make a cycle
+        # (perception -> landmarker -> callback -> perception), so a perception that was
+        # dropped without `close()` would wait for the garbage collector, and MediaPipe
+        # deadlocks when its landmarker is freed that way, at whatever moment the collector
+        # happens to run. Without the cycle it is freed the instant it is dropped.
+        result_buffer = self._result_buffer
+        notifier = self._notifier
 
         def _on_result(result, output_image, timestamp_ms):
             landmarks = Landmarks(
@@ -104,7 +237,8 @@ class HolisticPerception:
                 left=_points(result.left_hand_landmarks, 21),
                 right=_points(result.right_hand_landmarks, 21),
             )
-            self._result_buffer.put(landmarks)   # newest-wins, same B1 discipline
+            result_buffer.put(landmarks)   # newest-wins, same B1 discipline
+            notifier.fire()
 
         options = vision.HolisticLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=str(model_path)),
@@ -118,6 +252,11 @@ class HolisticPerception:
             self._landmarker = vision.HolisticLandmarker.create_from_options(options)
         except Exception as exc:
             raise PerceptionUnavailable(f"could not start Holistic Landmarker: {exc}") from exc
+        # Safety net for a perception that is dropped without `close()`. Measured: a landmarker
+        # freed by Python's cycle collector deadlocks inside MediaPipe's own `__del__`, and the
+        # collector can run at any moment, in any thread. The finalizer keeps the landmarker
+        # alive (so the collector never frees it) and closes it on a thread of its own.
+        self._finalizer = weakref.finalize(self, _close_outside_the_collector, self._landmarker)
 
     def submit_frame(self, jpeg_bytes: bytes, ts_ms: int) -> bool:
         """Decodes one JPEG and (every `stride`th call) sends it to MediaPipe.
@@ -133,6 +272,11 @@ class HolisticPerception:
         image_bgr = cv2.imdecode(array, cv2.IMREAD_COLOR)
         if image_bgr is None:
             raise PerceptionUnavailable("could not decode frame as an image")
+        # FR-K5 lighting feedback: mean brightness of a sparse sample of the frame (every
+        # 8th pixel each way, so it costs microseconds), smoothed over roughly ten frames so
+        # one flash or one dark frame does not flip a warning on.
+        brightness = float(image_bgr[::8, ::8].mean())
+        self.brightness = brightness if self.brightness is None else 0.8 * self.brightness + 0.2 * brightness
 
         image = self._mp.Image(
             image_format=self._mp.ImageFormat.SRGB,
@@ -153,8 +297,16 @@ class HolisticPerception:
         return self._result_buffer.get()
 
     def close(self) -> None:
-        if self._landmarker is not None:
-            self._landmarker.close()
+        """Frees the landmarker. Safe to call twice, and never raises: it runs in cleanup
+        paths, where an exception would skip whatever cleanup comes after it."""
+        self._notifier.listener = None   # nobody is told about results from a closing tracker
+        landmarker, self._landmarker = self._landmarker, None
+        if landmarker is None:
+            return
+        finalizer = getattr(self, "_finalizer", None)
+        if finalizer is not None:
+            finalizer.detach()   # closed here and now; the safety net must not close it again
+        _close_quietly(landmarker)
 
 
 def jpeg_size(data: bytes) -> tuple[int, int] | None:

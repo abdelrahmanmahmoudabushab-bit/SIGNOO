@@ -45,19 +45,40 @@ const arNum = n => Number(n).toLocaleString('ar-EG');
 // distinguishable from "thinking" at a glance — if it isn't, people re-sign
 // mid-sign and corrupt the very clip being captured.
 //
-// `thinking` is currently only set around an explicit ask (question -> answer).
-// A true per-utterance "recognising" state needs the backend to emit a signal at
-// the B3 segmentation boundary before B4 returns; that is a backend-phase item,
-// so it is left honestly absent rather than faked with a timer here.
+// `signing` and `recognising` come from the backend's `signing` message, which it sends
+// from the B3 segmenter: hands up and a word being collected, then the word closed and
+// the model running. Nothing here is faked with a timer. `thinking` is set around an
+// explicit ask (question -> answer).
+let camState = 'off';
 function setCamState(state) {
   const text = {
     off: 'الكاميرا متوقفة · <span dir="ltr">camera off</span>',
     watching: 'أراك · <span dir="ltr">I can see you</span>',
+    signing: 'أراك تُشير · <span dir="ltr">signing…</span>',
+    recognising: 'أقرأ إشارتك… · <span dir="ltr">reading your sign…</span>',
     thinking: 'أفكّر… · <span dir="ltr">thinking…</span>',
   }[state];
+  if (!text) return;                       // a state this build does not know is ignored, not shown blank
+  camState = state;
   el.camState.className = `cam-state${state === 'off' ? '' : ` is-${state}`}`;
   el.camState.innerHTML = text;
 }
+
+// FR-K5: what is wrong with the picture, said so the visitor knows what to change.
+// TODO(deaf-kiosk-ux): the Arabic here and in RETRY_TEXT is unreviewed; a Deaf reviewer's
+// wording replaces it, and each message wants an icon or sign clip beside the text.
+const FRAMING_TEXT = {
+  too_dark: 'الإضاءة ضعيفة — نحتاج ضوءًا أكثر · <span dir="ltr">Too dark — more light is needed</span>',
+  too_bright: 'الإضاءة قوية جدًا — الصورة باهتة · <span dir="ltr">Too bright — the picture is washed out</span>',
+  no_body: 'الجسم غير مرئي — تراجع قليلًا · <span dir="ltr">Body not detected — step back a little</span>',
+  perception_unavailable: 'تتبّع الحركة غير متاح الآن · <span dir="ltr">Tracking is not available right now</span>',
+};
+const FRAMING_TEXT_OTHER = 'لا تظهر اليدان بوضوح · <span dir="ltr">Hands not clearly visible</span>';
+
+const RETRY_TEXT = {
+  hands_lost: 'لم أرَ يديك بوضوح — أبقِهما أمام الكاميرا وأعد الإشارة · <span dir="ltr">I couldn\'t see your hands clearly — keep them in view and sign again</span>',
+  not_recognised: 'لم أفهم تلك الإشارة — جرّب مرة أخرى · <span dir="ltr">I didn\'t catch that — please sign again</span>',
+};
 
 // A translation bar shows either real text or a resting placeholder — never an
 // empty box, which reads as "broken" rather than "nothing signed yet".
@@ -99,7 +120,12 @@ async function loadLanguages() {
       if (!card) continue;
       card.disabled = !lang.ready;
       const badge = card.querySelector('.lang-soon');
-      if (badge && lang.ready) badge.textContent = lang.status === 'pilot' ? 'تجريبية · Pilot' : '';
+      if (badge && lang.ready) {
+        // A model trained only on generated data is pressable only where a developer
+        // switched that on (SIGNOO_ALLOW_SYNTHETIC). It must never look like a live language.
+        badge.textContent = !lang.real_data ? 'عرض تجريبي · Demo, not real signing'
+          : lang.status === 'pilot' ? 'تجريبية · Pilot' : '';
+      }
     }
   } catch {
     // leave the cards as marked in index.html
@@ -169,15 +195,18 @@ function handleMessage(msg) {
       }
       break;
     case 'landmarks':
+      frameAwaitingReply = false;
       if (el.overlay.dataset.skeletonOn === '1') drawLandmarks(el.overlay, el.video, msg);
       break;
     case 'framing':
       el.framingBanner.hidden = msg.ok !== false;
       if (!el.framingBanner.hidden) {
-        el.framingBanner.textContent = msg.reason === 'no_body'
-          ? 'الجسم غير مرئي — تراجع قليلًا · Body not detected — step back a little'
-          : 'لا تظهر اليدان بوضوح · Hands not clearly visible';
+        el.framingBanner.innerHTML = FRAMING_TEXT[msg.reason] ?? FRAMING_TEXT_OTHER;
       }
+      break;
+    case 'signing':
+      // Only while the camera is the thing on screen: an answer being fetched keeps "thinking".
+      if (stream && camState !== 'thinking') setCamState(msg.state);
       break;
     case 'hypothesis': onHypothesis(msg); break;
     case 'rendered':
@@ -234,6 +263,7 @@ function onHypothesis(msg) {
       el.candidateGrid.append(btn);
     }
   } else if (msg.status === 'rejected') {
+    el.retryBanner.innerHTML = RETRY_TEXT[msg.reason] ?? RETRY_TEXT.not_recognised;
     el.retryBanner.hidden = false;
   }
 }
@@ -324,9 +354,11 @@ function onSessionReset() {
 // ── camera (FR-K4) ───────────────────────────────────────────────────────────
 let stream = null;
 let frameTimer = null;
-const FRAME_INTERVAL_MS = 130;   // ~7.5 fps over the wire — plenty for pause-based
-                                  // segmentation (SYSTEM_DESIGN.md B3), far below
-                                  // the 60fps capture budget that matters on-device.
+const FRAME_INTERVAL_MS = 70;    // ~14 fps over the wire. Measured on the Jetson: MediaPipe
+                                  // there tops out near 10 hand positions a second, so sending
+                                  // faster only gets dropped (newest-wins), and sending at 7.5
+                                  // fps with every second frame skipped gave ~4 a second, which
+                                  // is what made the hand marker hop.
 const sendCanvas = document.createElement('canvas');
 
 async function startCamera() {
@@ -362,8 +394,18 @@ async function startCamera() {
 // payload size, and the server's decode+MediaPipe cost together.
 const SEND_MAX_SIDE = 480;
 
+// A frame is not sent while the last one is still unanswered. The backend answers each
+// processed frame with its landmarks, so this paces the camera to what the tracker can
+// actually do: nothing queues up, no frame is encoded just to be dropped, and the markers
+// stay on fresh data. If no answer comes (no result for that frame), it gives up after this
+// long and sends again, so a quiet stretch can never stall the camera.
+const FRAME_REPLY_TIMEOUT_MS = 200;
+let frameSentAt = 0;
+let frameAwaitingReply = false;
+
 function sendFrame() {
   if (!stream || !wsReady || el.video.readyState < 2) return;
+  if (frameAwaitingReply && performance.now() - frameSentAt < FRAME_REPLY_TIMEOUT_MS) return;
   const vw = el.video.videoWidth, vh = el.video.videoHeight;
   if (!vw || !vh) return;
   const scale = Math.min(1, SEND_MAX_SIDE / Math.max(vw, vh));
@@ -372,6 +414,8 @@ function sendFrame() {
   sendCanvas.getContext('2d').drawImage(el.video, 0, 0, w, h);
   const dataUrl = sendCanvas.toDataURL('image/jpeg', 0.6);
   send({ type: 'frame', ts_ms: Math.round(performance.now()), data: dataUrl });
+  frameSentAt = performance.now();
+  frameAwaitingReply = true;
 }
 
 function stopCamera() {

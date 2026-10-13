@@ -161,12 +161,15 @@
   </header>
 
   <div class="lang-grid">
-    <button class="lang-card" data-lang="liu">
+    <!-- Every card starts disabled and "coming soon". The backend (GET /languages) is what
+         enables a card, and only for a language whose model was trained on real signing.
+         If the backend cannot answer, no card is pressable, which is the safe way to fail. -->
+    <button class="lang-card" data-lang="liu" disabled>
       <span class="hand-badge"><svg class="lang-hand" aria-hidden="true"><use href="#glyph-hand"/></svg></span>
       <span class="lang-name">الأردنية</span>
       <span class="lang-id"><svg class="lang-flag" viewBox="0 0 60 40" aria-hidden="true"><use href="#flag-jo"/></svg><span class="lang-code" dir="ltr">LIU</span></span>
       <span class="lang-en" dir="ltr">Jordanian</span>
-      <span class="signclip">الاسم بالإشارة</span>
+      <span class="lang-soon">قريبًا</span>
     </button>
 
     <button class="lang-card" data-lang="esl" disabled>

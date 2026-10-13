@@ -377,6 +377,10 @@ body{
 }
 .cam-state::before{content:"";width:11px;height:11px;border-radius:50%;background:var(--ink-soft);flex:none}
 .cam-state.is-watching::before{background:var(--rose);animation:breathe 2s ease-in-out infinite}
+/* Each state differs in shape and motion, not only colour, so it reads without colour vision:
+   watching = slow breathing dot, signing = solid steady dot, recognising/thinking = spinning square. */
+.cam-state.is-signing::before{background:var(--rose);width:14px;height:14px}
+.cam-state.is-recognising::before{background:var(--guide);border-radius:2px;animation:spin 1s linear infinite}
 .cam-state.is-thinking::before{background:var(--guide);border-radius:2px;animation:spin 1s linear infinite}
 @keyframes breathe{0%,100%{opacity:1}50%{opacity:.3}}
 @keyframes spin{to{transform:rotate(360deg)}}

@@ -59,14 +59,19 @@ language's whole engine: `model`, `vocab`, optional `confident_threshold` /
 `reject_threshold`, optional `segmentation` tuning, `knowledge_base` and
 `clip_library`, plus `status` (`live` | `pilot` | `coming_soon`) and `real_data` (was
 the model trained on real human signing). `kiosk/languages.py` loads each one into a
-`LanguagePack` at startup.
+`LanguagePack` at startup. A language with `real_data: false` must have the status
+`coming_soon` (`kiosk/tests/test_live_feedback.py` fails otherwise); that is `liu` today.
 
 Pressing a card switches the visitor to that pack as a unit
 (`KioskConnection._use_engine`). Nothing is shared and nothing falls back across
 languages:
 
-- A language is **ready** only if its checkpoint and vocabulary load. Selecting one
-  that is not ready returns `language_unavailable` and changes nothing.
+- A language is **ready** only if its checkpoint and vocabulary load, and **selectable**
+  only if it is also trained on real signing (or `SIGNOO_ALLOW_SYNTHETIC=1`). Selecting one
+  that is not selectable returns `language_unavailable` and changes nothing. In
+  `GET /languages`, `ready` is the selectable answer and `model_loaded` is the plain one.
+- Every card in `index.html` starts disabled and "coming soon"; the page enables only what
+  `GET /languages` reports ready. If the backend cannot answer, no card is pressable.
 - A language with no `knowledge_base` (or an empty one, like `asl` today:
   `kiosk/data/knowledge_base_asl.json` is `[]`) refuses every question. It never
   answers from another language's knowledge base.
@@ -85,8 +90,12 @@ add its vocabulary and clip library under `core/` and its knowledge base under
 `SIGNOO_CLIP_LIBRARY_PATH` apply to the default language (`liu`) only.
 `kiosk/replay.py` builds its segmenter from the same pack, so it mirrors the kiosk
 per language.
-`models/asl_pilot.pt` is the American pilot, trained on PopSign (CC BY 4.0) phone-camera
-clips, a handful of signs only; it is shown as "Pilot" and is not a Jordanian model.
+The American pilot is `models/asl50.bars.pt`: 50 words trained on PopSign (CC BY 4.0)
+phone-camera clips, with a per-word confirmation bar for the 45 words that have one
+(`ml/word_bars.py`). It commits a word at 0.80 confidence (or the word's own higher bar),
+offers the top three between 0.25 and that, and refuses below 0.25. It is shown as "Pilot"
+and is not a Jordanian model. `models/asl_pilot.pt` (8 signs) is the earlier pilot, kept
+but no longer configured.
 
 ## Wire protocol (`/ws/session`)
 
@@ -95,8 +104,8 @@ JSON text frames both ways; the full reference lives as a docstring at the top o
 (`getUserMedia`); every processed frame is sent to this backend as **base64
 JPEG**, and *all* of B2 Perception, B3 Segmentation, B4 Recognition, B5 Assembly,
 B7 Dialogue, and B8 Playback run server-side. The browser only draws what it's
-told (skeleton overlay, recognised words, candidates, the answer, playback
-placeholders) — this keeps the model, the KB, and the clip library in one place
+told (corner marks round the hands and face, recognised words, candidates, the answer,
+playback placeholders) — this keeps the model, the KB, and the clip library in one place
 and matches `SYSTEM_DESIGN.md`'s "no camera handles, no model objects... crossing
 a boundary" rule at the process boundary too, not just between Python modules.
 
@@ -105,6 +114,11 @@ a boundary" rule at the process boundary too, not just between Python modules.
 - **B1 Capture** (`kiosk/buffers.py`) — `SingleSlotBuffer`: newest-wins, always
   drops rather than queues. Used both for MediaPipe's async LIVE_STREAM results
   (`kiosk/perception.py`) and is unit-tested directly (`tests/test_buffers.py`).
+  **A result is handled the moment the tracker produces it** (2026-10-13): the tracker
+  wakes a task on the connection (`_ensure_result_consumer` in `kiosk/main.py`) which
+  sends the landmarks and feeds the segmenter. Before, a result waited in the slot until
+  the next frame arrived and asked for it, which delayed every hand position by a frame
+  and, with the browser pacing its frames to the answers, lost every second result.
 - **B2 Perception** (`kiosk/perception.py`) — MediaPipe Holistic in **LIVE_STREAM**
   mode (not `ml/extract_landmarks.py`'s VIDEO mode — that mode is for a finite
   recorded file; LIVE_STREAM is the Tasks API's mode for a live, one-frame-at-a-time
@@ -114,14 +128,39 @@ a boundary" rule at the process boundary too, not just between Python modules.
   `ml/extract_landmarks.py`'s "fresh landmarker per clip". Degrades to a typed
   `PerceptionUnavailable` (never a crash) if MediaPipe/OpenCV/the model file
   aren't usable.
+  The tracker takes seconds to start, so it is **started when a language card is
+  pressed**, in a worker thread, while the visitor reads the consent screen; signing can
+  then begin the moment they agree (measured on a PC: consent to active in 53 ms, tracker
+  start 3.3 s). It is given no frame until consent. A tracker that finishes starting
+  after the page has gone, or after the visit ended, is closed and not attached.
+  **A tracker must be closed, never left to the garbage collector:** a MediaPipe
+  landmarker freed by Python's cycle collector deadlocks in its own `__del__` (measured
+  2026-10-13; it hung the test suite). `HolisticPerception` closes on every exit path and
+  has a finalizer that hands a forgotten one to a thread of its own to close
+  (`tests/test_perception_lifecycle.py`). It also reports the frame's mean brightness,
+  for the lighting warning (FR-K5).
+  On MediaPipe 0.10.x (the Jetson ships 0.10.18) a frame with a person in view and hands
+  down aborts the whole process; `install_empty_packet_guard` patches that, and logs
+  `mediapipe_empty_packet_guard_not_installed` if a later 0.10 release renames what it
+  patches.
 - **B3 Segmentation** (`kiosk/segmentation.py`) — the IDLE/ACTIVE/BOUNDARY state
   machine from `SYSTEM_DESIGN.md` B3, thresholds in `kiosk/config.py` (env-var
-  overridable), unit-tested in `tests/test_segmentation.py`.
-- **B4 Recognition** (`kiosk/recognition.py`) — loads `models/signoo.pt`, reuses
-  `ml/model.py`'s `SignTransformer` and `core/features.py` unchanged. Rejection
+  overridable), unit-tested in `tests/test_segmentation.py` and
+  `tests/test_live_feedback.py`.
+  **A word's length is measured in time, not frames** (since 2026-10-13): at least 3
+  frames spanning 150 ms, at most 4.5 s. The old rule, "at least 6 frames", is 0.2 s at 30
+  tracked frames a second but 0.6 s at the Jetson's ~10, and dropped ordinary quick signs
+  without a word; figures in `docs/LIVE_PIPELINE.md`. The segmenter also counts the frames
+  where the hands vanished mid-word (`Utterance.frames_without_hands`); a word that was
+  more than half holes is refused with the reason `hands_lost` and never classified.
+- **B4 Recognition** (`kiosk/recognition.py`) — one `Recognizer` per language (see
+  "Languages" above), reusing `ml/model.py` and `core/features.py` unchanged. Rejection
   (`Hypothesis.gloss=None`) is explicit and tested (`tests/test_recognition.py`)
   with a hand-built checkpoint whose head bias makes the output deterministic, so
-  the test doesn't depend on training having converged.
+  the test doesn't depend on training having converged. Each model takes one throwaway
+  forward pass at start-up (`warm_up`), so the first sign of the day does not pay
+  PyTorch's first-call cost; `/health` reports the seconds per language in `warm_up_s`,
+  and `null` there means that model failed to run.
 - **B5 Assembly** (`kiosk/assembly.py`) — template/dictionary rendering from
   `core/vocab.json`, the single word list shared with `server/`'s KB editor.
 - **B6 Output** (`kiosk/output.py`) — `TTSEngine.speak_async` returns a `Future`
@@ -144,8 +183,23 @@ a boundary" rule at the process boundary too, not just between Python modules.
   sequenced and highlighted the same way a real clip would be.
 - **B9 Session/telemetry** (`kiosk/session.py`) — `Session` state machine
   (attract/language/consent/active/ended), a correlation id per session, JSON
-  structured logs via stdlib `logging` (UTF-8-safe stream). Temperature/throttle
-  are reported as the string `"unavailable"`.
+  structured logs via stdlib `logging` (UTF-8-safe stream). `/health`'s `telemetry`
+  carries the hottest thermal zone and this process's resident memory where the platform
+  reports them (the Jetson; `"unavailable"` on Windows), plus `LiveStats`: `tracker_fps`
+  (tracked frames a second over the last 5 s, `null` with nobody at the camera),
+  `frame_ms`, `classify_ms`, and counts of outcomes (`committed`, `candidates`,
+  `rejected`, `hands_lost`). `throttled` is still always `"unavailable"`.
+  Three log lines are for judging a live session afterwards: `recognition` (one per sign:
+  status, word, confidence, the bar it was held to, top 3, frames, frames without hands,
+  span, classify time), `frame_timing` (every 100 frames: average frame cost, tracker
+  rate, brightness) and `perception_ready` (tracker start-up seconds). None holds
+  landmarks or identity.
+- **What the visitor is told while signing** (`kiosk/main.py`, `assets/app.js`):
+  `signing` messages move the camera badge between "I can see you", "signing…" and
+  "reading your sign…" (NFR-X1); `framing` says when the picture is too dark, too
+  bright, or shows no body (FR-K5); a rejection says why (`not_recognised` or
+  `hands_lost`). `framing` and `signing` are sent when they change, not with every frame.
+  The Arabic of these messages is unreviewed and waits for a Deaf reviewer.
 - **B10 Data capture** (`kiosk/data_capture.py`) — on `consent_retention=true`,
   buffers landmarks/predictions/corrections in exactly `docs/API_CONTRACTS.md §4`'s
   shape to `kiosk/data/pending_uploads/<session_id>.json`. **Upload is wired
@@ -186,7 +240,19 @@ client-side only: the backend's `SessionState` still has just
 `attract|language|consent|active|ended` (see `docs/ROADMAP.md` drift item 6).
 `assets/app.js` is the WebSocket client driving it, `assets/vision.js` trimmed to pure canvas drawing (perception moved
 server-side, so the old in-browser MediaPipe loader is gone), `assets/kiosk.css`
-added for the new screens. `assets/recognizer.js` (the old client-side
+added for the new screens.
+
+**The overlay is corner marks, not a skeleton (owner's decision, 2026-10-12).** FR-K4
+and the `deaf-kiosk-ux` skill both say "tracked skeleton overlay". The dots and lines
+covered the visitor's own hands and face, so `vision.js` draws four white rounded
+corners round each hand and round the face (pose points 0–10) and eases them between
+tracker updates; the skeleton code is still there behind `SHOW_HANDS` / `SHOW_BODY`. It
+answers the same question, "does the camera see me", but it is a departure from the
+written requirement that a Deaf reviewer has not yet judged.
+
+**Frames are paced to the tracker.** The page captures a frame every 70 ms, shrinks it to
+480 px, and does not send one while the last is still unanswered (it gives up waiting
+after 200 ms). Nothing queues and no frame is encoded only to be dropped. `assets/recognizer.js` (the old client-side
 nearest-neighbour classifier) was deleted — confirmed unused by `record.js`
 first, so the recording studio (`record.html`, untouched) is unaffected.
 `assets/vocab.js` is kept only for `record.html`; the kiosk frontend fetches
@@ -198,9 +264,58 @@ shared), so gloss labels can't drift between the two.
 belongs — there is no such video yet, so these are explicit text labels, never a
 faked video element.
 
+## Replaying recordings through the live path (NFR-N1)
+
+```bash
+export PYTHONIOENCODING=utf-8
+.venv/Scripts/python.exe -m kiosk.replay data/popsign/raw --language asl \
+    --signers 7002 8012 --signs apple book dog --tracker-fps 10
+```
+
+Feeds each video to the same tracker, segmenter and recogniser the kiosk uses, the way
+the browser would send it, and reports per clip what the kiosk would have done:
+committed (right or wrong), offered candidates (with or without the true word), refused,
+or produced no word at all. `--tracker-fps` gives the tracker only that many frames a
+second, which is how a development machine shows what the Jetson's ~10 a second does to
+a sign. Use validation signers only; the test signers stay untouched until a final model.
+
+## Playing recordings to a running kiosk, as the browser would
+
+```bash
+export PYTHONIOENCODING=utf-8
+# starts a backend itself:
+.venv/Scripts/python.exe -m kiosk.live_check data/popsign/raw --language asl \
+    --signers 7002 8012 --signs apple book dog
+# or a kiosk that is already running, such as the Jetson:
+.venv/Scripts/python.exe -m kiosk.live_check data/popsign/raw --language asl \
+    --signers 7002 --url ws://192.168.100.60:8000/ws/session
+```
+
+`kiosk/replay.py` drives the tracker, segmenter and recogniser directly. This goes
+through everything between them and the visitor as well: the JPEG the page sends and its
+pacing, the WebSocket, the consent gate, and when results come back. It found two faults
+on 2026-10-13 that the unit tests and the replay tool could not see. It prints, per clip,
+the outcome a visitor would have seen, and at the end how many frames were sent against
+how many results came back; those two should be close. It takes over the kiosk's one
+connection, so run it against a kiosk only when no visitor is there. Consent is sent with
+retention off. **Run this, not only the unit tests, after any change to the frame path.**
+
+## Sending it to the Jetson
+
+```bash
+scripts/deploy-jetson.sh --dry-run    # what would be sent
+scripts/deploy-jetson.sh              # send, restart, check /health
+```
+
+Saves the Jetson's current copy first and prints the command that puts it back. Exits 2,
+having changed nothing, when the Jetson cannot be reached. **Only the dry run and the
+unreachable path have been run** (the Jetson was off the network on 2026-10-13); the
+backup, send, restart and health-check steps are untested until it is used for real.
+
 ## Verification performed
 
-- `.venv/Scripts/python.exe -m pytest kiosk/tests -q` — 16 tests, all passing:
+- `.venv/Scripts/python.exe -m pytest kiosk/tests -q` — all passing (run it for the
+  current count; 16 at the first build, over a hundred by 2026-10-13):
   buffer semantics, segmentation state transitions, recognition rejection vs.
   commit (deterministic toy checkpoint), TTS non-blocking ordering, dialogue
   refusal/fallback, and `core/features.py` train/inference bit-for-bit parity

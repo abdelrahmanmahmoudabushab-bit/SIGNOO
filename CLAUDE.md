@@ -20,6 +20,8 @@ standard of "better than nothing."
 4. `docs/ROADMAP.md` — phases, current state vs. plan, the next two weeks
 5. `docs/API_CONTRACTS.md` — the shapes crossing `kiosk/` ↔ `server/` ↔ `console/`
 6. `docs/DATA_COLLECTION.md`, `docs/TRAINING.md` — dataset and model specifics
+7. `docs/LIVE_PIPELINE.md` — how one sign travels from camera to caption as built, what
+   has been measured on it, and a backlog of ideas (ideas, not commitments)
 
 If a doc and the code disagree, say so out loud rather than picking one silently —
 both `docs/ROADMAP.md` and `kiosk/README.md` have sections written specifically to
@@ -76,7 +78,24 @@ cd console && npm run dev
 
 # everything at once (run alone; the server's gate tests train models and need free RAM)
 scripts/test-all.sh          # or: scripts/test-all.sh fast
+
+# recorded clips played to the kiosk over its real WebSocket, as the browser would
+# (validation signers only). Run this after any change to the frame path: it found two
+# faults on 2026-10-13 that every unit test passed over. Add --url ws://<kiosk>:8000/ws/session
+# to put the clips through a running kiosk such as the Jetson.
+PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m kiosk.live_check data/popsign/raw \
+    --language asl --signers 7002 8012 --signs apple book dog hello milk
+
+# the tracker, segmenter and model alone, at the Jetson's tracker speed
+PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m kiosk.replay data/popsign/raw \
+    --language asl --signers 7002 8012 --tracker-fps 10
+
+# send the kiosk to the Jetson (backup, restart, health check); --dry-run to preview
+scripts/deploy-jetson.sh
 ```
+
+A kiosk test that leaves a tracker (`HolisticPerception`) unclosed can hang the whole
+run: MediaPipe deadlocks when Python's garbage collector frees one. Close what you open.
 
 Deployment settings that matter (details in `server/README.md` and `kiosk/README.md`):
 server refuses to start without `SIGNOO_JWT_SECRET` and `SIGNOO_KIOSK_TOKEN` (or
@@ -94,5 +113,7 @@ already handles this; raw scripts do not.
 below · `server/` B11–B16 backend · `console/` admin UI ·
 `core/` shared features/contracts/vocab between `kiosk/` and `ml/` · `ml/` training
 pipeline · `index.html`/`assets/` the kiosk's browser frontend, served by
-`kiosk/main.py` · `data/`, `models/` datasets and checkpoints (currently synthetic
-only — no real signer data yet, this is the project's actual bottleneck).
+`kiosk/main.py` · `data/`, `models/` datasets and checkpoints, both gitignored. For
+Jordanian (`liu`) they are synthetic only: there is no real Jordanian signer data yet,
+and that is the project's actual bottleneck. American (`asl`) has real public data
+(PopSign, CC BY; ASL Citizen, research-only licence) and a 50-word pilot model.

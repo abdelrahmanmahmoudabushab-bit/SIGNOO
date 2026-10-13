@@ -238,6 +238,36 @@ def test_skipping_the_language_message_does_not_reach_an_unselectable_engine(mon
             assert ws.receive_json()["session_state"] == "active"
 
 
+def test_empty_hand_streams_are_filled_so_mediapipe_never_reads_an_empty_packet():
+    """Found on the Jetson (MediaPipe 0.10.18): a person in view with no hands up leaves the
+    hand streams empty, and reading one aborts the whole backend process."""
+    from kiosk.perception import fill_empty_streams
+
+    class Packet:
+        def __init__(self, empty, label=""):
+            self._empty, self.label = empty, label
+
+        def is_empty(self):
+            return self._empty
+
+    face = Packet(False, "face")
+    packets = {"face_landmarks": face, "pose_landmarks": Packet(False, "pose"),
+               "left_hand_landmarks": Packet(True), "left_hand_world_landmarks": Packet(True),
+               "right_hand_landmarks": Packet(False, "right"), "right_hand_world_landmarks": Packet(True)}
+    made = []
+
+    def make_empty(name):
+        made.append(name)
+        return Packet(False, f"filled:{name}")
+
+    filled = fill_empty_streams(packets, make_empty)
+
+    assert sorted(made) == ["left_hand_landmarks", "left_hand_world_landmarks", "right_hand_world_landmarks"]
+    assert not any(p.is_empty() for p in filled.values())
+    assert filled["pose_landmarks"].label == "pose" and filled["right_hand_landmarks"].label == "right"   # real data untouched
+    assert packets["left_hand_landmarks"].is_empty()                       # the input is not modified
+
+
 def test_one_dead_thermal_zone_does_not_hide_the_others_or_crash_health(tmp_path, monkeypatch):
     """Found on the Jetson: a zone with no sensor made read_text raise TypeError, which took
     /health down with a 500. The hottest readable zone must still be reported."""
@@ -256,6 +286,20 @@ def test_one_dead_thermal_zone_does_not_hide_the_others_or_crash_health(tmp_path
     monkeypatch.setattr(Path, "read_text", read_text)
 
     assert read_temperature_c(str(tmp_path)) == 55.25
+
+
+def test_the_frontend_is_always_revalidated_so_a_kiosk_never_runs_a_stale_page():
+    """Found on the Jetson: a week-old cached app.js kept new language cards "coming soon"."""
+    from fastapi.testclient import TestClient
+
+    import kiosk.main as kiosk_main
+
+    client = TestClient(kiosk_main.app)
+    for path in ("/", "/assets/app.js", "/assets/vision.js", "/core/vocab.json"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert response.headers["cache-control"] == "no-cache", path
+    assert "cache-control" not in client.get("/health").headers      # live data is not a cached file
 
 
 # ── one connection at a time ────────────────────────────────────────────────────

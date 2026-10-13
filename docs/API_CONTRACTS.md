@@ -149,31 +149,34 @@ language's whole engine (`SYSTEM_DESIGN.md` §1.1b). Read at kiosk start by
   "code": "asl",
   "status": "pilot",
   "real_data": true,
-  "model": "models/asl_pilot.pt",
+  "model": "models/asl50.bars.pt",
   "vocab": "core/vocab_asl.json",
   "knowledge_base": "kiosk/data/knowledge_base_asl.json",
   "clip_library": "core/clip_library_asl.json",
-  "confident_threshold": 0.88,
-  "reject_threshold": 0.55,
-  "segmentation": {"pause_ms": 500, "motion_threshold": 0.02,
-                   "hands_absent_ms": 800, "min_frames": 6}
+  "confident_threshold": 0.80,
+  "reject_threshold": 0.25,
+  "segmentation": {"pause_ms": 500, "motion_threshold": 0.02, "hands_absent_ms": 800,
+                   "min_frames": 3, "min_ms": 150, "max_ms": 4500, "max_frames": 150}
 }
 ```
+
+The `segmentation` object in the example shows the kiosk defaults; the real `asl` entry
+sets none of them.
 
 These are all the keys the loader reads. Any other key is ignored.
 
 | Key | Required | Meaning |
 |---|---|---|
 | `code` | yes | The language code used everywhere else: the `language` websocket message, session uploads, the registry, the model endpoint |
-| `status` | yes | `live`, `pilot` or `coming_soon`. Passed through to the frontend for the card's badge. It does not decide whether the card can be pressed; `ready` does (§8) |
-| `real_data` | no, default `false` | Whether the model was trained on real human signing. Reported, not enforced |
+| `status` | yes | `live`, `pilot` or `coming_soon`. Passed through to the frontend for the card's badge. It does not decide whether the card can be pressed; `ready` does (§8). A language with `real_data: false` must be `coming_soon` (checked by `kiosk/tests/test_live_feedback.py`) |
+| `real_data` | no, default `false` | Whether the model was trained on real human signing. **Enforced since 2026-10-12:** a language where this is `false` is not offered to a visitor unless the kiosk runs with `SIGNOO_ALLOW_SYNTHETIC=1` (development and tests only) |
 | `model` | no | Checkpoint path, relative to the repository root. `null` or absent means no model |
 | `vocab` | no | Vocabulary file (§1 shape), relative to the repository root |
 | `knowledge_base` | no | Knowledge-base file (a JSON array of §3 entries) for this language only |
 | `clip_library` | no | Clip-library manifest (§2 shape) for this language only |
 | `reject_threshold` | no | Below this probability the recogniser returns no hypothesis. Default: the kiosk's `SIGNOO_REJECT_THRESHOLD` (0.55) |
 | `confident_threshold` | no | Below this probability the visitor is offered candidates instead of a committed word. Default: the kiosk's `SIGNOO_CONFIDENT_THRESHOLD` (0.80) |
-| `segmentation` | no | Object with any of `pause_ms`, `motion_threshold`, `hands_absent_ms`, `min_frames`. A key left out takes the kiosk default. Any other key inside it raises an error when a connection is built for that language |
+| `segmentation` | no | Object with any of `pause_ms`, `motion_threshold`, `hands_absent_ms`, `min_frames`, `min_ms`, `max_ms`, `max_frames`. A key left out takes the kiosk default. Any other key inside it raises an error when a connection is built for that language. A word must have at least `min_frames` frames spanning at least `min_ms`, and is closed as it stands after `max_ms` (or `max_frames`, the memory bound) |
 
 Loading rules, as the code has them:
 
@@ -182,6 +185,9 @@ Loading rules, as the code has them:
 - A configured language is **ready** when its vocabulary and its checkpoint both load.
   If either fails, the language is not ready and the reason is logged; the kiosk still
   starts.
+- A ready language is **selectable**, meaning a visitor may be put on it, only when
+  `real_data` is `true` or the kiosk was started with `SIGNOO_ALLOW_SYNTHETIC=1`. Both the
+  `language` message and the `consent` message refuse a language that is not selectable.
 - The knowledge base and the clip library are loaded only for a ready language. If one
   is absent or fails to load, the language stays ready and goes without that part.
 - `SIGNOO_MODEL_PATH`, `SIGNOO_VOCAB_PATH`, `SIGNOO_KB_PATH` and
@@ -204,8 +210,9 @@ one object per entry in `core/languages.json`, in file order
     "code": "asl",
     "status": "pilot",
     "ready": true,
+    "model_loaded": true,
     "real_data": true,
-    "labels": 14,
+    "labels": 50,
     "model_version": null,
     "vocab_url": "/core/vocab_asl.json",
     "has_knowledge_base": true,
@@ -217,7 +224,8 @@ one object per entry in `core/languages.json`, in file order
 | Field | Meaning |
 |---|---|
 | `code`, `status`, `real_data` | Copied from the entry (§7) |
-| `ready` | `true` when this language's model and vocabulary are both loaded. The frontend enables a card only when this is `true` |
+| `ready` | `true` when this language may be offered to a visitor: its model and vocabulary are loaded **and** it is selectable (§7). The frontend enables a card only when this is `true`; every card starts disabled in `index.html` |
+| `model_loaded` | `true` when the model and vocabulary loaded, whether or not the language may be offered. A language can be `model_loaded` and not `ready`: `liu` on a production kiosk today |
 | `labels` | Number of labels in the loaded model, `0` when no model is loaded. The count includes the `__other__` label if the model has one |
 | `model_version` | The version the server rolled out to this kiosk for this language (§10), or `null` when the kiosk is running the checkpoint it shipped with. Added on 2026-10-11 |
 | `vocab_url` | Where the frontend fetches this language's vocabulary, or `null` when the language is not ready or its vocabulary file is outside the served directory |
@@ -234,9 +242,25 @@ The numbers in the example are illustrative.
   "model_loaded": true,
   "labels": 20,
   "languages": [ ...the same array as GET /languages... ],
-  "telemetry": { ... }
+  "telemetry": {
+    "temperature_c": 52.5, "throttled": "unavailable", "memory_mb": 912.4,
+    "tracker_fps": 10.2, "frame_ms": 3.1, "classify_ms": 14.0,
+    "outcomes": {"committed": 12, "candidates": 5, "rejected": 2, "hands_lost": 1}
+  },
+  "warm_up_s": {"liu": 0.026, "asl": 0.008}
 }
 ```
+
+`telemetry` (the numbers above are illustrative): `temperature_c` and `memory_mb` are
+real where the platform reports them and the string `"unavailable"` where it does not
+(Windows); `throttled` is always `"unavailable"`, nothing reads it yet. `tracker_fps` is
+tracked frames a second over the last five seconds and `null` when no frame has arrived
+in that time, which means "nobody at the camera", not "stalled". `frame_ms` is the average
+cost of taking one frame in, `classify_ms` the last model pass, and `outcomes` counts
+recognitions since the process started. None of it identifies a visitor or a word.
+
+`warm_up_s` is the seconds each loaded model took for its start-up test pass. `null` for
+a language means the pass failed and that model may not run at all.
 
 `status`, `model_loaded` and `labels` describe the default language (`liu`) only:
 `status` is `"ok"` when `liu` is ready and `"degraded"` otherwise, even if other
@@ -273,9 +297,34 @@ but the connection's language has no model loaded), `perception_error`, `bad_jso
 `unknown_message`, `unknown_control`.
 
 Two behaviours to know about. A connection starts on the default language's engine
-(`liu`) and returns to it when a session ends, so a client that never sends `language`
-is served by `liu`. And the frontend falls back to `/core/vocab.json` for its labels
-when a selected card has no `vocab_url`.
+(`liu`) and returns to it when a session ends. A client that never sends `language` is
+therefore on `liu`, and its `consent` is refused with `language_unavailable` unless `liu`
+is selectable (§7), so it cannot be recognised by a model that may not be offered. And the
+frontend falls back to `/core/vocab.json` for its labels when a selected card has no
+`vocab_url`.
+
+Pressing a card also starts the tracker in the background, so it is ready by the time
+consent is given. It receives no frame before consent.
+
+### 8.4 What the visitor is told while signing
+
+Sent by the kiosk during an active session; the frontend shows each one (FR-K5, NFR-X1).
+`framing` and `signing` are sent when their content changes, not with every frame.
+
+```json
+{"type": "framing", "ok": false, "reason": "too_dark"}
+{"type": "signing", "state": "signing"}
+{"type": "hypothesis", "status": "rejected", "reason": "hands_lost",
+ "gloss": null, "confidence": 0.0, "alternatives": []}
+```
+
+| Message | Values | Meaning |
+|---|---|---|
+| `framing.reason` | `too_dark`, `too_bright`, `no_body`, `perception_unavailable`, `null` | What is wrong with the picture. Lighting is checked first, since a dark or washed-out frame is usually also why no body is found. `ok` is `true` only when `reason` is `null` |
+| `signing.state` | `watching`, `signing`, `recognising` | Nothing being signed; hands up and a word being collected; the word is closed and the model is running |
+| `hypothesis.reason` | `not_recognised`, `hands_lost` | Present on a rejection only. `hands_lost`: tracking lost both hands for more than `SIGNOO_MAX_HANDS_LOST_SHARE` (0.5) of the word's frames, and nothing was classified |
+
+A client must ignore a `reason` or `state` it does not know rather than show it blank.
 
 ## 9. Kiosk authentication (`X-Kiosk-Token`)
 
@@ -301,21 +350,23 @@ Rules:
   start with a blank token unless `SIGNOO_ENV=dev`.
 - The kiosk sends the header only when its own `SIGNOO_KIOSK_TOKEN` is set, and makes
   these calls only when `SIGNOO_SERVER_URL` is set.
-- The token is one secret for the whole fleet. It proves "this is one of our kiosks",
-  not which one; the `kiosk_id` in the path or body is not verified against it.
-  `SYSTEM_DESIGN.md` specifies mTLS for this link. mTLS is not implemented, and this
+- In the default mode (`SIGNOO_KIOSK_TOKEN_MODE=shared`) the token is one secret for the
+  whole fleet. It proves "this is one of our kiosks", not which one; the `kiosk_id` in
+  the path or body is not verified against it.
+- In `per_kiosk` mode (2026-10-12) each kiosk presents its own token,
+  HMAC-SHA256 of its `kiosk_id` under the server's `SIGNOO_KIOSK_TOKEN`, and a call for
+  one kiosk made with another kiosk's token gets `401`. Issue a kiosk's token on the
+  server with `python -m server.scripts.kiosk_token <kiosk_id>`.
+- `SYSTEM_DESIGN.md` specifies mTLS for this link. mTLS is not implemented, and this
   header is what exists in its place.
 - Console calls do not use this header. They use a bearer JWT and roles (§5).
 
-## 10. Model distribution (BEING BUILT, not yet verified against code)
+## 10. Model and knowledge-base distribution
 
-**Status on 2026-10-11:** this is the contract two engineers are implementing now. It
-is written here so both sides build the same thing. It has not been verified against
-finished code. While this section was being written, a kiosk client
-(`kiosk/model_sync.py`) and a server route (`get_model` in `server/routers/fleet.py`)
-appeared in the working tree, uncommitted and still changing. Read side by side they
-agreed with the contract below, but nothing was run for this document. Treat every line
-as the agreed target and re-check it against the code once both sides are merged.
+**Status on 2026-10-13:** built on both sides and committed (`kiosk/model_sync.py`,
+`kiosk/kb_sync.py`, `get_model` and `get_knowledge_base` in `server/routers/fleet.py`),
+with tests on each side. This section was re-read against that code on this date. It has
+not run against a real fleet.
 
 A kiosk pulls its models. One request asks about one language, because each language's
 model is a separate engine (`SYSTEM_DESIGN.md` §1.1b).
@@ -326,9 +377,10 @@ X-Kiosk-Token: <token>
 If-None-Match: "<version the kiosk has installed for this language>"    (optional)
 ```
 
-**Desired version.** The model of the most recent active rollout that targets this
-kiosk and whose model's language matches `<code>`. A rollout of a model for another
-language is never an answer to this request.
+**Desired version.** The model of the most recent served rollout (`active` or
+`completed`) that targets this kiosk, whose model's language matches `<code>` and whose
+model is still `promoted`. A rollout of a model for another language is never an answer
+to this request, and a rolled-back version stops being an answer at once.
 
 | Status | When | Body and headers |
 |---|---|---|
@@ -340,15 +392,30 @@ language is never an answer to this request.
 
 `401` applies as for every `X-Kiosk-Token` call (§9).
 
-Details seen in the uncommitted server code that go beyond the agreed contract, to be
-confirmed or dropped at merge: the `304` also carries the `ETag` header; `409` covers
-both "no checkpoint path recorded" and "the recorded file is missing"; and
+Also true of the code: the `304` carries the `ETag` header; `409` covers both "no
+checkpoint path recorded" and "the recorded file is missing"; and
 `POST /fleet/rollouts` refuses a version that is not `promoted` with `409`, so only a
 gated model can become a desired version.
 
 What the kiosk does with a `200` is its own business, but the contract depends on it
 never installing bytes whose sha256 differs from `X-Model-Sha256`, and on a failed
-install leaving that language's running model in place.
+install leaving that language's running model in place. A `204` for a language the kiosk
+had been given a model for means that model was withdrawn (a rollback): the kiosk goes
+back to the checkpoint it shipped with.
+
+**Knowledge base.** The same pattern, per language:
+
+```
+GET /fleet/kiosks/{kiosk_id}/kb?language=<code>
+X-Kiosk-Token: <token>
+If-None-Match: "<etag of the copy the kiosk has>"    (optional)
+```
+
+`200` returns a JSON array of §3 entries for that language and the kiosk's site (plus the
+`default` site), with an `ETag`; `304` when the kiosk's copy is current; `204` when the
+language has no entries, which tells the kiosk to keep what it has; `404` when the kiosk
+is not registered. The kiosk writes what it receives beside its synced models, never over
+the seed file in the repository, and keeps its working copy if a download does not parse.
 
 **Heartbeat.** A heartbeat (§9) may carry the versions the kiosk has installed, one per
 language:

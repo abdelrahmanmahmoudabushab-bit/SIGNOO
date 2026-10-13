@@ -103,9 +103,11 @@ the block it belongs to):
   it was trained on real people, unless the deployment sets `SIGNOO_ALLOW_SYNTHETIC=1`.
   `GET /languages` reports `ready` as that answer and `model_loaded` separately. The
   consequence is deliberate: a production kiosk shows `liu` as "coming soon" until real
-  signer data exists. The kiosk test suite and a dev machine opt in explicitly. (The
-  `core/languages.json` `status` value `"live"` for `liu` is still wrong by the same rule
-  and should become `"pilot"` or `"coming_soon"`; it is data, not changed here.)
+  signer data exists. The kiosk test suite and a dev machine opt in explicitly.
+  **2026-10-13:** `liu`'s `status` in `core/languages.json` is now `coming_soon`, a test
+  fails if any language with `real_data: false` says otherwise, every card in
+  `index.html` starts disabled until the backend enables it, and a synthetic model that a
+  developer has switched on is badged "Demo, not real signing" on its card.
 - **Fixed 2026-10-12:** the server's knowledge base (B14) had no language field. Entries
   now carry a `language`, are checked against that language's own vocabulary and clip
   library, are written to that language's own file named in `core/languages.json`, and are
@@ -113,14 +115,15 @@ the block it belongs to):
   `kiosk/kb_sync.py`). A language with no `knowledge_base` file listed refuses new entries.
 - The server's fleet record (B15) still holds one `language` and one
   `current_model_version` per kiosk beside the new per-language `model_versions`, and
-  the kiosk always registers as `liu`. Per-language model distribution is being built
-  on 2026-10-11 and exists only as uncommitted work (B15).
+  the kiosk always registers as `liu`. Per-language model distribution itself is
+  committed (`0270591`); see B15.
 - The automatic cycle runs only for the languages named in
   `SIGNOO_AUTO_TRAIN_LANGUAGES`, which defaults to `liu` alone.
 - A kiosk connection holds the `liu` engine from the moment it opens until a card is
-  pressed, and returns to it when the session ends. A client that skips the `language`
-  message is served by the `liu` engine. The kiosk's `/health` status also reflects
-  `liu` only.
+  pressed, and returns to it when the session ends. **Fixed 2026-10-12:** a client that
+  skips the `language` message is no longer served by it: `consent` is refused with
+  `language_unavailable` unless the connection's language is selectable. The kiosk's
+  `/health` status still reflects `liu` only.
 - The frontend loads `/core/vocab.json` (the `liu` vocabulary) for its on-screen labels
   if `GET /languages` gave it no `vocab_url` for the selected card
   (`assets/app.js`). This is a cross-language fallback in the browser, for labels only.
@@ -165,6 +168,16 @@ correct behaviour; queueing them is not.
 Threads: capture, inference, and UI are separate, communicating through single-slot
 buffers.
 
+**As built (2026-10-13).** Capture is in the browser, which sends a JPEG to the kiosk
+backend at most every 70 ms and not while its last frame is unanswered. Tracking runs on
+MediaPipe's own thread and puts each result in a single-slot buffer. Until 2026-10-13
+the stage after tracking was not separate: a result was collected only when the next
+frame arrived, which delayed every hand position by a frame and, once the browser waited
+for answers, stalled both sides and lost every second result. It is now its own task,
+woken by the tracker the moment a result exists (`kiosk/main.py`,
+`_ensure_result_consumer`), which is what this section always specified. The model pass
+runs in a worker thread so it cannot block the event loop.
+
 ### B2 — Perception
 
 **Does:** frames → body and hand landmarks.
@@ -172,6 +185,19 @@ buffers.
 MediaPipe Holistic (upper-body pose + 21 landmarks per hand), converted to TensorRT.
 Runs on every second frame → 30 fps. This is the largest item in the latency budget
 (~20 ms) and the first place to optimise.
+
+**As built (2026-10-13), and it is far from that design.** The TensorRT conversion has
+not been done. Perception is MediaPipe's CPU build, run by the kiosk backend on JPEG
+frames the browser sends (at most 480 px, one every 70 ms, and none while the previous
+one is unanswered). On the Jetson it reaches **about 10 tracked frames a second,
+measured**, a third of the 30 the design and NFR-P5 call for, at roughly 100 ms a frame
+against the 20 ms budgeted in §4.1. Everything downstream has had to be made independent
+of that rate (B3). The GPU path is the single largest outstanding piece of engineering
+on the kiosk; `docs/LIVE_PIPELINE.md` §4 and §6 list the candidates.
+
+The tracker is started when a language card is pressed, so it is ready by consent, and
+is given no frame before consent. It must always be closed explicitly: a landmarker left
+to Python's garbage collector deadlocks (`kiosk/README.md`, B2).
 
 Emits `None` for absent hands rather than zeros, so downstream can distinguish "hand
 not visible" from "hand at origin" — a distinction that silently corrupts features if
@@ -200,27 +226,35 @@ IDLE ──hands enter frame──> ACTIVE ──motion below threshold for N ms
 
 Word-boundary tuning is part of each language's engine (§1.1b), because signing tempo
 differs between languages and between people. A language's `segmentation` entry in
-`core/languages.json` may set any of `pause_ms`, `motion_threshold`, `hands_absent_ms`
-and `min_frames`. A key it leaves out takes the kiosk default from `kiosk/config.py`
-(500 ms, 0.02, 800 ms, 6 frames). Each connection builds a fresh segmenter from the
-selected language's values when the card is pressed (`LanguagePack.make_segmenter`).
+`core/languages.json` may set any of `pause_ms`, `motion_threshold`, `hands_absent_ms`,
+`min_frames`, `min_ms`, `max_ms` and `max_frames`. A key it leaves out takes the kiosk
+default from `kiosk/config.py` (500 ms, 0.02, 800 ms, 3 frames, 150 ms, 4500 ms, 150
+frames). Each connection builds a fresh segmenter from the selected language's values
+when the card is pressed (`LanguagePack.make_segmenter`), so the segmenter changes
+together with the model. The state machine code is common to all languages; only the
+numbers differ.
 
 The design requires these values to be tuned on real recordings of that language and
 never guessed. The code does not meet that yet: no language sets a `segmentation` entry
-today, so `liu` and `asl` both run on the kiosk defaults, and `kiosk/config.py` says
-those defaults were tuned on synthetic data.
+today, so `liu` and `asl` both run on the kiosk defaults, and the pause and motion
+defaults were tuned on synthetic data.
 
-Word-boundary tuning is part of a language's engine (§1.1b). A language's `segmentation`
-entry in `core/languages.json` may set any of `pause_ms`, `motion_threshold`,
-`hands_absent_ms` and `min_frames`; a key it leaves out takes the kiosk default from
-`kiosk/config.py`. Each connection builds its segmenter from the selected language's
-pack (`LanguagePack.make_segmenter`), so the segmenter changes together with the model.
-The state machine code is common to all languages; only the numbers differ.
+**A word's length is a time, not a frame count (2026-10-13).** The first rule was "at
+least 6 frames, at most 45". A frame count means a different length of time at every
+tracker speed: 6 frames is 0.2 s at the 30 tracked frames a second this design assumed
+and 0.6 s at the 10 the Jetson reaches (B2), and a quick sign keeps the hands in view
+for about that long. Replaying 60 validation clips at 10 tracked frames a second, the old
+rule produced **no word at all for 11 of them**, with nothing on screen to say so; with
+"at least 3 frames spanning 150 ms" one clip did, and the rest became correct words or
+offered candidates. The 45-frame ceiling had the mirror fault, cutting a long sign in
+two at full tracker speed, and is now 4.5 s. Figures and method:
+`docs/LIVE_PIPELINE.md` §15. Any future threshold in this block should be a time for the
+same reason.
 
-As built on 2026-10-11, no language sets a `segmentation` entry, so every language runs
-on the kiosk defaults, and `kiosk/config.py` says those defaults were tuned on
-synthetic data. The "tuned on real recordings" promise above is not met yet for any
-language.
+The segmenter also counts frames where both hands vanished in the middle of a word and
+then came back (`Utterance.frames_without_hands`). A word that was more than half holes
+is refused with the reason `hands_lost`, without being classified (FR-K5; the share is
+`SIGNOO_MAX_HANDS_LOST_SHARE`, 0.5, a loose starting value that is not tuned).
 
 **Honest about the limit:** this reads *deliberate, paused signing* well and fluent
 connected signing poorly. Fluent signers do not pause between words.
@@ -255,8 +289,13 @@ unaffected.
 threshold (below it there is no hypothesis) and confident threshold (below it the
 visitor is offered candidates instead of a committed word, FR-K8). A language sets them
 with `reject_threshold` and `confident_threshold` in its entry. Otherwise the kiosk
-defaults apply (0.55 and 0.80 in `kiosk/config.py`). Today `asl` sets a confident
-threshold of 0.88 and `liu` uses the defaults.
+defaults apply (0.55 and 0.80 in `kiosk/config.py`). Today (2026-10-13) `asl` rejects
+below 0.25 and commits at 0.80, and `liu` uses the defaults. A checkpoint may also carry
+`word_bars`, a higher commit bar for individual words the model is known to confuse
+(`ml/word_bars.py`); a word's bar can only be stricter than the language's, never
+looser. `asl`'s checkpoint has them for 45 of its 50 words. Those bars were fitted on
+the validation signers and the gain was reported on the same clips, so the reported
+figure is optimistic until it is checked on signers not used for either.
 
 **What this replaces, and what it costs.** The earlier revision of this section
 specified one shared backbone with a small per-language head. It had two reasons:
@@ -306,14 +345,17 @@ says "coming soon" rather than running an untrained or synthetic-only model live
 Which language is recruited next, after LIU, is an open decision (`docs/ROADMAP.md`) —
 the architecture does not need that decision made to support the menu.
 
-The state of the nine entries on 2026-10-11: `liu` is `live`, `asl` is `pilot`, the
-other seven are `coming_soon` with no model. The `asl` model is marked as trained on
-real data (`kiosk/README.md` gives the source as PopSign). The `liu` model is
-`models/signoo.pt`, trained on synthetic data, and its entry says `"real_data": false`
-while its status is `live`. That contradicts the paragraph above and the project's
-non-negotiable rule, and the code does not prevent it: a card is pressable when its
-model and vocabulary load, whatever `real_data` says. The owner has to decide whether
-`liu` goes back to "coming soon" until real data exists.
+The state of the nine entries on 2026-10-13: `asl` is `pilot` and is the only language a
+visitor can press; the other eight are `coming_soon`. The `asl` model
+(`models/asl50.bars.pt`, 50 words) is trained on real data (PopSign, CC BY 4.0). `liu`
+has a model, `models/signoo.pt`, but it is trained on synthetic data
+(`"real_data": false`), so `liu` reads "coming soon" and cannot be pressed on a
+production kiosk. This closes the contradiction recorded here on 2026-10-11, in two
+steps: the code refuses a language whose model was not trained on real signing unless
+the deployment sets `SIGNOO_ALLOW_SYNTHETIC=1` (2026-10-12), and `liu`'s status in the
+data now says `coming_soon`, held there by a test (2026-10-13). The consequence is that
+the project's first language, the one v1 is accepted on (Requirements §8), is not
+available to visitors at all until real Jordanian recordings exist.
 
 Rejection is a first-class output: anything beyond the rejection threshold returns *no
 hypothesis*, and the UI asks the visitor to sign again. A confident mistranslation is
@@ -476,16 +518,31 @@ attract (presence auto-detected, no tap-to-start)
    → attract (reset, NFR-S3 erasure unchanged)
 ```
 
-**Presence detection (`attract`) is new engineering, not yet built.** Today the kiosk
-only turns the camera on when a visitor explicitly starts a session (`getUserMedia` on
-button press); nothing watches the idle screen for an approaching visitor. Candidate
-approaches: a low-fps face/person detector on the same camera feed used for B2 (cheapest,
-no new hardware, but means the camera is always live, which needs its own
-privacy-review sentence since today's design assumes the camera is off until consent);
-or a dedicated presence sensor (PIR/ultrasonic/radar) gating when the camera turns on at
-all (more hardware, cleaner privacy story — camera stays off until someone is actually
-there). Pick one in Phase 2 alongside the Jetson bring-up; it is a camera/sensor
-decision, not a model decision, so it does not block on any language's dataset.
+**Presence detection (`attract`): a first version is built, and it keeps the camera on
+at idle.** `assets/app.js` opens the camera on the hello screen at 160×120, shrinks a
+sample to 32×24 every 400 ms, and moves to the language screen after about 1.2 s of
+sustained change between samples. Those frames stay in the browser: nothing is sent to
+the backend, nothing is stored, and the recognition camera still waits for consent. The
+hello screen says so in words ("Watching to say hello — nothing is recorded or sent"),
+and touching the screen always works too. This is the cheaper of the two approaches this
+section used to list as candidates, chosen on 2026-10-08 (`docs/TECH_STACK.md`), and it
+carries the cost named then: **the camera is live before consent**, which FR-K3
+("before the camera starts") and the `deaf-kiosk-ux` skill ("ask before the camera
+starts") both read against. It has not had a privacy review. The alternative, a
+dedicated presence sensor (PIR, ultrasonic, radar) that keeps the camera off until
+someone is there, is more hardware and a cleaner privacy story, and stays open as a later
+upgrade. What is still owed is the privacy review and a decision on FR-K3's wording
+(§8, question 9); it is a camera and sensor matter, not a model one, so it does not
+block on any language's dataset.
+
+**What the visitor is told while signing (2026-10-13).** Three kinds of message from the
+backend, each shown on screen (`docs/API_CONTRACTS.md` §8.4): `signing` moves the camera
+badge between "I can see you", "signing…" and "reading your sign…", driven by the B3
+segmenter and not by a timer (NFR-X1); `framing` says when the picture is too dark, too
+bright, or shows no body (FR-K5); and a rejection carries its reason, `not_recognised`
+or `hands_lost`. The camera overlay is four corner marks round each hand and the face,
+not the skeleton FR-K4 names: an owner's decision of 2026-10-12, because the dots and
+lines covered the visitor's hands, and one a Deaf reviewer has not yet judged.
 
 ### B10 — Data capture
 
@@ -540,9 +597,14 @@ As built (`server/training.py`, `server/scheduler.py`):
 - The scheduler will not start a language's cycle until that language's benchmark has
   been frozen by a deliberate first run (`POST /training/trigger`).
 - A candidate is never promoted by this block.
-
-The module docstring at the top of `server/training.py` still says no automatic cycle
-exists. That comment is out of date; the scheduler is in the code.
+- One run per language at a time: a database lock is held for the length of a run, so
+  two workers (or the scheduler and an engineer) cannot gate two candidates against the
+  same champion (2026-10-12).
+- The benchmark can only be anchored on **enrolled** signers, never on anonymous kiosk
+  visits (2026-10-12). The automatic cycle therefore cannot start from kiosk traffic
+  alone: it needs enrolled, named signers from a data-collection session first.
+- `POST /training/trigger` trains inside the request. It should hand the run to the
+  background and return; it does not yet.
 
 ### B13 — Registry and promotion gate
 
@@ -574,10 +636,9 @@ As built (`server/gate.py`, `server/shadow.py`, `server/routers/registry.py`):
   candidate's language.
 - Promotion is a separate action by an engineer or admin, allowed only for a version in
   `shadow` status whose gate passed. Nothing automatic can promote.
-- `POST /training/trigger` accepts an explicit `champion_version`. In the committed
-  code it is not checked against the candidate's language. Uncommitted work on
-  2026-10-11 adds that check (a champion of another language is refused with 409
-  before any training starts); confirm it is merged before relying on it.
+- `POST /training/trigger` accepts an explicit `champion_version`. A champion of another
+  language is refused with 409 before any training starts (`ChampionLanguageMismatch` in
+  `server/training.py`; committed).
 - The false-accept criterion (DR-6 item 5) is not measured. `server/gate.py` treats it
   as passed when either figure is missing, which is always, because the benchmark has
   no non-signing clips.
@@ -585,8 +646,14 @@ As built (`server/gate.py`, `server/shadow.py`, `server/routers/registry.py`):
 - The shadow evaluation is not a parallel run on live kiosks. It scores the candidate
   on reviewed items newer than the candidate and compares that with what the kiosk's
   model said at the time.
-- Automatic rollback on live-metric degradation is not built. Manual rollback changes
-  the version's status and does not move any kiosk back by itself.
+- Manual rollback is one action and does move kiosks (2026-10-12):
+  `POST /registry/{version}/rollback` retires that version's rollouts
+  (`server/rollouts.py::retire`), the server stops handing it out, and each kiosk returns
+  to its previous still-promoted version, or to the checkpoint it shipped with, at its
+  next sync (`kiosk/model_sync.py`). A kiosk that is offline keeps the withdrawn model
+  until it next reaches the server.
+- Automatic rollback on live-metric degradation is not built. Nothing watches live
+  metrics during a rollout.
 
 ### B14 — Knowledge base
 
@@ -597,12 +664,16 @@ Under §1.1b this content is per language as well as per site: each language's e
 answers only from its own knowledge base, and the unrenderable-word warning must be
 computed against that language's own vocabulary and clip library.
 
-The server does not do this yet. A knowledge-base entry has a `site_id` and no language
-(`server/models.py`). Every entry is written to one file,
-`kiosk/data/knowledge_base.json`, which is the `liu` engine's knowledge base, and the
-warning is computed from `core/vocab.json` and `core/clip_library.json`, which are the
-`liu` files (`server/config.py`, `server/kb.py`). So the console can only edit `liu`
-content, and any other language's knowledge base is a file edited by hand on the kiosk.
+As built since 2026-10-12 (`server/models.py`, `server/kb.py`,
+`server/routers/kb.py`): an entry carries a `language`, is checked against that
+language's own vocabulary and clip library, and is written to the file that language
+names in `core/languages.json`. A language with no `knowledge_base` listed refuses new
+entries. Kiosks fetch each language's knowledge base over the network
+(`GET /fleet/kiosks/{id}/kb`, `kiosk/kb_sync.py`), keep it across restarts, and keep the
+one they have if a download does not parse.
+
+Still open: the console's `KBEntry` type has no `language` field, so the console cannot
+yet choose which language an entry is for.
 
 ### B15 — Fleet control
 
@@ -614,38 +685,43 @@ so its fleet state is one installed version per language, and a rollout of a mod
 moves only the engine of that model's language on the targeted kiosks. A new `asl`
 model must never replace or disturb the `liu` engine on the same kiosk.
 
-State of the code on 2026-10-11. This block is being built by two engineers today. The
-model-distribution parts below were read in the uncommitted working tree, were not run
-for this document, and are still changing, so check the code before relying on them:
+State of the code on 2026-10-13. Everything below is committed (`0270591`) and covered
+by tests (`server/tests/test_deployment_hardening.py`, `kiosk/tests/test_model_sync.py`,
+`kiosk/tests/test_rollback_and_kb_sync.py`). None of it has run against a real fleet:
 
 - Registration, heartbeat, the kiosk list and rollout creation exist
   (`server/routers/fleet.py`). A rollout names a model version and a list of kiosk ids.
-  Uncommitted: only a `promoted` version can be rolled out, so a rollout cannot put an
-  ungated model on a kiosk.
-- The kiosk side of model distribution is written (`kiosk/model_sync.py`): after each
+  Only a `promoted` version can be rolled out, so a rollout cannot put an ungated model
+  on a kiosk.
+- The kiosk side of model distribution (`kiosk/model_sync.py`): after each
   delivered heartbeat it asks the server, once per language that has a model
   configured, whether a different version is assigned. It installs a download only if
   the sha256 matches the server's header and the file loads as a checkpoint, then swaps
   that one language's recogniser and records the version so a restart keeps it. A bad
-  download leaves the running model untouched.
-- The server endpoint that answers that request is written, uncommitted
-  (`GET /fleet/kiosks/{kiosk_id}/model?language=<code>`). It answers with the model of
-  the newest active rollout that targets the kiosk and whose model is of the requested
-  language, so a rollout of one language's model never changes what a kiosk is told to
-  run for another. The contract is in `docs/API_CONTRACTS.md` §10.
+  download leaves the running model untouched. When the server answers that nothing is
+  assigned any more (a rollback), the kiosk goes back to the checkpoint it shipped with.
+- The server endpoint that answers that request
+  (`GET /fleet/kiosks/{kiosk_id}/model?language=<code>`) answers with the model of
+  the newest served rollout that targets the kiosk, whose model is of the requested
+  language and is still promoted, so a rollout of one language's model never changes
+  what a kiosk is told to run for another. The contract is in `docs/API_CONTRACTS.md` §10.
 - The kiosk sends `model_versions` (language code to installed version) in its
   heartbeat and the server stores it per kiosk.
 - The older single-language fields remain: a kiosk record has one `language` and one
   `current_model_version`, and the kiosk always registers as `liu`. A rollout updates
   `current_model_version` only when the model's language equals the kiosk's registered
   language.
-- A rollout is never closed or superseded in code: nothing sets a rollout's status to
-  anything but `active`, so "most recent active rollout" is in practice "most recent
-  rollout", and moving a kiosk back means creating a new rollout of the older version.
+- A rollout ends (2026-10-12): it becomes `completed` once every targeted kiosk reports
+  the version installed, and `rolled_back` when its version is rolled back
+  (`server/rollouts.py`). A rolled-back rollout is no longer served.
 - Staging, health-based automatic rollback and remote diagnostics are not built.
-- The transport is not mTLS. Kiosk calls carry a shared secret in the `X-Kiosk-Token`
-  header (`docs/API_CONTRACTS.md` §9), which identifies the fleet, not the individual
-  kiosk.
+- The transport is not mTLS. Kiosk calls carry a secret in the `X-Kiosk-Token` header
+  (`docs/API_CONTRACTS.md` §9). In `per_kiosk` mode (2026-10-12) each kiosk has its own
+  token, an HMAC of its id, so one kiosk's token cannot act as another; in the default
+  `shared` mode the secret identifies the fleet, not the individual kiosk.
+- The kiosk's own figures (tracker rate, stage timings, memory, outcome counts) are on
+  its `/health` (B9) but are not sent in the heartbeat, so the console cannot show them
+  and nothing alerts on them yet.
 
 ### B16 — Console API
 
@@ -671,6 +747,20 @@ UI render                    ~16 ms   (one frame at 60 Hz)
 
 Wide headroom, deliberately: these are bench figures, and the real device runs hot,
 shares memory with a language model, and drives a display.
+
+**Against what has been measured (2026-10-13).** Landmark extraction on the Jetson is
+about 100 ms a frame, not 20 (CPU build, no TensorRT; B2). Classification on a
+development PC is about 15 ms (median, features included) after the start-up warm-up
+pass, with stalls up to 200 ms when the machine is busy; it is not timed on the Jetson. The budget above also
+leaves out the one thing the visitor actually waits for: a word is only classified once
+the segmenter decides it has ended, which is `pause_ms` (500 ms) of stillness or
+`hands_absent_ms` (800 ms) of the hands being gone. So "end of sign to word on screen"
+is currently 0.5–0.8 s plus the stages above, over NFR-P1's 300 ms target and at or over
+its 500 ms hard limit, by design of B3 and not by slowness. It has not been timed on the
+device end to end. The kiosk now logs each stage (`recognition`, `frame_timing`) and
+shows "reading your sign…" during the model pass, which makes the wait visible; it does
+not make it shorter. Shortening it means lowering the two pause values on evidence from
+real signing, or continuous recognition (Roadmap Phase 4.5).
 
 **Outside this budget:** speech synthesis, answer generation, sign playback. They
 happen after text appears.
@@ -762,7 +852,11 @@ Designed for, not discovered later.
 | Selected language has no clip library, or a word has no recording | Nothing is played for it; the word is shown as not yet recorded. Never another language's sign, never a generated one |
 | Downloaded model fails its sha256 or will not load | Discarded. The running model for that language is untouched; other languages are not involved |
 | Promotion gate rejects candidate | That language's champion stays; reason recorded; alert if rejections repeat, since that means the review pipeline is producing bad data. Other languages' champions are not affected either way |
-| Bad model promoted anyway | Automatic rollback on live-metric degradation; one-action manual rollback. Both act on one language. As built: the automatic rollback does not exist, and the manual one changes the registry status without moving any kiosk |
+| Bad model promoted anyway | Automatic rollback on live-metric degradation; one-action manual rollback. Both act on one language. As built: the automatic rollback does not exist. The manual one retires the version's rollouts and each kiosk returns to its previous promoted version, or its factory checkpoint, at its next sync (2026-10-12) |
+| Tracking loses the hands for most of a sign | The word is refused with "I couldn't see your hands", and is not classified (2026-10-13) |
+| Lighting too dark or too bright for the camera | Said on screen while it lasts (FR-K5, 2026-10-13). The thresholds only catch the extremes and are not tuned on site |
+| A model fails its start-up test pass | Logged as `model_warm_up_failed` and shown as `null` in `/health`'s `warm_up_s`. Not built: the language is not taken off the menu by it |
+| The page disconnects while the tracker is still starting | The tracker is closed when it finishes starting, not attached. A tracker that is ever dropped unclosed is closed on a thread of its own, because freeing one in the garbage collector deadlocks MediaPipe (2026-10-13) |
 | Visitor walks away mid-session | Timeout with visible countdown; session erased; return to clean idle |
 | Reviewer queue backs up | Alert; training simply uses less new data. Never auto-approves to clear a backlog |
 
@@ -811,9 +905,25 @@ Carried into the question round rather than silently decided:
    language's data, as long as it is then trained, gated and shipped as its own
    checkpoint? The shared backbone existed partly for this transfer (B4). Nothing in
    the code does it today.
-7. **LIU's card (opened 2026-10-11).** `liu` is live on a model trained on synthetic
-   data, against the rule that such a language says "coming soon" (B4). Take it off the
-   menu until real data exists, or accept it as a development-only state?
+7. ~~LIU's card (opened 2026-10-11)~~ — **resolved 2026-10-13** by applying the rule:
+   `liu` says "coming soon" and cannot be pressed until a model trained on real Jordanian
+   signing exists; a development machine opts in with `SIGNOO_ALLOW_SYNTHETIC=1` and the
+   card is then badged as a demo (B4).
 8. **Memory with every language loaded (opened 2026-10-11).** Not measured on the
    Jetson (§4.2). If it does not fit, loading on selection is the fallback, at the
-   price of a wait on the language screen.
+   price of a wait on the language screen. The kiosk's `/health` now reports its own
+   resident memory on the Jetson, so the measurement is one request once the device is
+   reachable.
+9. **Presence detection keeps the camera on before consent (opened 2026-10-13).** The
+   version chosen and built on 2026-10-08 watches the idle screen through the camera
+   (B9). It has an on-screen notice and sends nothing, but no privacy review, and FR-K3
+   says consent comes "before the camera starts". Amend FR-K3 to allow it after a privacy
+   review, or replace it with a presence sensor so the camera stays off until consent?
+10. **Corner marks instead of the skeleton overlay (opened 2026-10-13).** FR-K4 and the
+    `deaf-kiosk-ux` skill specify a tracked skeleton; the kiosk draws corner marks round
+    the hands and face (B9). Amend FR-K4, or bring the skeleton back, after Deaf users
+    have seen both.
+11. **How long the visitor waits for a word (opened 2026-10-13).** The pause that ends a
+    word is 0.5–0.8 s, which alone is over NFR-P1 (§4.1). Lower the pause values on
+    evidence, or restate NFR-P1 as "from the end of the pause" until continuous
+    recognition exists?

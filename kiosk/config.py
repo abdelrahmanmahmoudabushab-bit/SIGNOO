@@ -62,19 +62,52 @@ class Config:
     segmentation_hands_absent_ms: int = field(
         default_factory=lambda: _env_int("SIGNOO_HANDS_ABSENT_MS", 800)
     )
+    # A word needs at least this many tracked frames AND this much time, first frame to
+    # last. It was 6 frames and no time rule, which is 0.2 s at 30 tracked frames a second
+    # but 0.6 s at the Jetson's ~10: ordinary quick signs were dropped without a word.
+    # 3 frames over 150 ms keeps the old behaviour at 30 a second (6 frames span 167 ms)
+    # and stops depending on the tracker's speed below that. Measured on validation
+    # signers with kiosk/replay.py --tracker-fps; figures in docs/LIVE_PIPELINE.md.
     min_utterance_frames: int = field(
-        default_factory=lambda: _env_int("SIGNOO_MIN_UTTERANCE_FRAMES", 6)
+        default_factory=lambda: _env_int("SIGNOO_MIN_UTTERANCE_FRAMES", 3)
+    )
+    min_utterance_ms: int = field(
+        default_factory=lambda: _env_int("SIGNOO_MIN_UTTERANCE_MS", 150)
     )
 
-    # A word is closed and emitted at this many buffered frames even if the hands never
-    # pause, so a visitor (or anything else on the socket) cannot grow one without
-    # limit. About 6 s at the ~7.5 frames/s the browser sends (assets/app.js).
-    max_utterance_frames: int = field(
-        default_factory=lambda: _env_int("SIGNOO_MAX_UTTERANCE_FRAMES", 45)
+    # A word is closed and emitted after this long even if the hands never pause, so a
+    # visitor (or anything else on the socket) cannot grow one without limit. It is a
+    # time, for the same reason the minimum is: the old limit of 45 frames was 4.5 s at
+    # the Jetson's ~10 tracked frames a second but 1.5 s at 30, where it cut a long sign
+    # in two (seen in a full-rate replay, 2026-10-13). The frame limit stays as the bound
+    # on memory and is set high enough not to bite before the time limit at 30 a second.
+    max_utterance_ms: int = field(
+        default_factory=lambda: _env_int("SIGNOO_MAX_UTTERANCE_MS", 4500)
     )
+    max_utterance_frames: int = field(
+        default_factory=lambda: _env_int("SIGNOO_MAX_UTTERANCE_FRAMES", 150)
+    )
+
+    # A word in which tracking lost both hands for more than this share of its frames is
+    # refused with the reason "hands_lost" instead of being classified: most of what the
+    # model would read is interpolation, and a guess from that is worse than asking the
+    # visitor to sign again (FR-K5, Requirements §6.3). 0.5 is a deliberately loose
+    # starting value, not a tuned one: nothing is refused unless more than half the sign
+    # is missing. Tune it on replayed live sessions (kiosk/replay.py); 1.0 turns it off.
+    max_hands_lost_share: float = field(
+        default_factory=lambda: _env_float("SIGNOO_MAX_HANDS_LOST_SHARE", 0.5)
+    )
+
+    # FR-K5: lighting the camera cannot work in is shown to the visitor. Mean brightness
+    # of the frame, 0 (black) to 255 (white), averaged over about a second. The defaults
+    # only catch the extremes (a covered or unlit camera, a washed-out picture) and are
+    # not tuned on site; a deployment sets its own after looking at its `frame_timing` logs.
+    light_too_dark: float = field(default_factory=lambda: _env_float("SIGNOO_LIGHT_TOO_DARK", 35.0))
+    light_too_bright: float = field(default_factory=lambda: _env_float("SIGNOO_LIGHT_TOO_BRIGHT", 230.0))
 
     # B1/B2 input limits for one "frame" message, checked before anything is decoded.
-    # The browser sends 960x720 JPEG at quality 0.6, well under both.
+    # The browser sends a JPEG of at most 480 px on its long side at quality 0.6
+    # (assets/app.js), well under both.
     max_frame_b64_chars: int = field(
         default_factory=lambda: _env_int("SIGNOO_MAX_FRAME_B64_CHARS", 300_000)
     )
@@ -161,8 +194,13 @@ class Config:
     # a development machine or a demo with no real signer data yet sets it to 1.
     allow_synthetic: bool = field(default_factory=lambda: _env_bool("SIGNOO_ALLOW_SYNTHETIC", False))
 
-    # Perception — every second captured frame, per SYSTEM_DESIGN.md B2 budget.
-    perception_stride: int = field(default_factory=lambda: _env_int("SIGNOO_PERCEPTION_STRIDE", 2))
+    # Perception: which of the frames the browser sends go to MediaPipe.
+    # 1 = every frame the browser sends goes to MediaPipe. It was 2 when the browser sent 30
+    # fps; with it sending ~14 fps (assets/app.js) skipping every second frame left ~4 hand
+    # positions a second, which made tracking choppy and meant a word needed ~1.6 s to reach
+    # the 6-frame minimum. The Jetson tops out near 10 a second, so frames beyond that are
+    # dropped newest-wins rather than queued.
+    perception_stride: int = field(default_factory=lambda: _env_int("SIGNOO_PERCEPTION_STRIDE", 1))
 
 
 CONFIG = Config()
@@ -174,5 +212,7 @@ SEGMENTATION_DEFAULTS = {
     "motion_threshold": CONFIG.segmentation_motion_threshold,
     "hands_absent_ms": CONFIG.segmentation_hands_absent_ms,
     "min_frames": CONFIG.min_utterance_frames,
+    "min_ms": CONFIG.min_utterance_ms,
+    "max_ms": CONFIG.max_utterance_ms,
     "max_frames": CONFIG.max_utterance_frames,
 }

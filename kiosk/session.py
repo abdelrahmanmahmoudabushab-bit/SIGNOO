@@ -13,8 +13,10 @@ import enum
 import json
 import logging
 import sys
+import threading
 import time
 import uuid
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -114,14 +116,81 @@ def read_temperature_c(root: str = "/sys/class/thermal") -> float | None:
     return max(temps) if temps else None
 
 
-def telemetry_snapshot() -> dict:
-    """Latency/frame-rate fields are filled in by the caller per-connection. The
-    temperature is real where the platform reports one; everything else stays
-    honestly "unavailable" (SYSTEM_DESIGN.md B9) rather than a plausible fake number.
+def read_memory_mb(path: str = "/proc/self/status") -> float | None:
+    """This process's resident memory in MB, from the kernel (Jetson and any Linux), or
+    None where there is no /proc, as on a Windows dev machine. NFR-M2 needs this number
+    watched over days: a leak shows up on day nine, not in a demo."""
+    try:
+        for line in Path(path).read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return round(int(line.split()[1]) / 1024, 1)   # the kernel reports kB
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+class LiveStats:
+    """What the pipeline is doing right now (B9: latency per stage, frame rate, interaction
+    outcomes). One kiosk has one visitor, so one of these serves the whole process; it is
+    written from the event loop and read by /health and the heartbeat thread, hence the lock.
+
+    It holds counts and timings only: no landmarks, no words, nothing about who signed.
+    """
+
+    WINDOW_S = 5.0          # the tracker rate is the average over this many seconds
+
+    def __init__(self, clock=time.monotonic):
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._tracker_results: deque[float] = deque()
+        self._frame_seconds: deque[float] = deque(maxlen=100)
+        self._classify_ms: float | None = None
+        self._outcomes: Counter = Counter()
+
+    def note_tracker_result(self) -> None:
+        now = self._clock()
+        with self._lock:
+            self._tracker_results.append(now)
+            while self._tracker_results and now - self._tracker_results[0] > self.WINDOW_S:
+                self._tracker_results.popleft()
+
+    def note_frame(self, seconds: float) -> None:
+        with self._lock:
+            self._frame_seconds.append(seconds)
+
+    def note_outcome(self, status: str, classify_seconds: float | None = None) -> None:
+        with self._lock:
+            self._outcomes[status] += 1
+            if classify_seconds is not None:
+                self._classify_ms = round(classify_seconds * 1000, 1)
+
+    def snapshot(self) -> dict:
+        now = self._clock()
+        with self._lock:
+            recent = [t for t in self._tracker_results if now - t <= self.WINDOW_S]
+            frames = list(self._frame_seconds)
+            return {
+                # None, not 0, when nobody is in front of the camera: "no visitor" must not
+                # read as "the tracker has stalled".
+                "tracker_fps": round(len(recent) / self.WINDOW_S, 1) if recent else None,
+                "frame_ms": round(sum(frames) / len(frames) * 1000, 1) if frames else None,
+                "classify_ms": self._classify_ms,
+                "outcomes": dict(self._outcomes),
+            }
+
+
+def telemetry_snapshot(live: LiveStats | None = None) -> dict:
+    """Temperature and memory are real where the platform reports them and honestly
+    "unavailable" where it does not (SYSTEM_DESIGN.md B9), never a plausible fake number.
+    `live` adds the pipeline's own figures: tracker rate, stage latencies, outcomes.
     """
     temperature = read_temperature_c()
-    return {
+    memory = read_memory_mb()
+    snapshot = {
         "temperature_c": temperature if temperature is not None else "unavailable",
         "throttled": "unavailable",
-        "memory_mb": "unavailable",
+        "memory_mb": memory if memory is not None else "unavailable",
     }
+    if live is not None:
+        snapshot.update(live.snapshot())
+    return snapshot

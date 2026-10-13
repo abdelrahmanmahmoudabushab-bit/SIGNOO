@@ -80,6 +80,15 @@ class Segmenter:
     # Hands that never pause would otherwise buffer frames for as long as they move.
     # At this many frames the word is closed and emitted as it stands.
     max_frames: int = 45
+    # A word must also last at least this long, first frame to last. `min_frames` alone
+    # is a length in frames, so its meaning in time depends on how fast the tracker runs:
+    # 6 frames is 0.2 s at 30 tracked frames a second and 0.6 s at the Jetson's 10, where
+    # it threw away ordinary quick signs without a word (measured with kiosk/replay.py
+    # --tracker-fps, 2026-10-13). Time is what separates a sign from a tracking flicker.
+    min_ms: int = 0
+    # The same point for the upper limit: a word still open after this long is closed as
+    # it stands. `max_frames` stays as the bound on memory; 0 here means no time limit.
+    max_ms: int = 0
 
     state: SegmentState = SegmentState.IDLE
     _buffer: list[Landmarks] = field(default_factory=list)
@@ -88,6 +97,16 @@ class Segmenter:
     _armed: bool = True            # False right after a word, until the hands move again
     _still_since_ms: int | None = None
     _hands_absent_since_ms: int | None = None
+    # Frames where the hands vanished in the middle of the word being buffered. A gap is
+    # only counted once the hands come back: hands that leave and stay away are how a
+    # sign ends, not a hole in it.
+    _gap_frames: int = 0
+    _open_gap: int = 0
+
+    @property
+    def buffering(self) -> bool:
+        """A word is being collected right now: what the screen shows as "signing"."""
+        return self.state != SegmentState.IDLE and self._armed and bool(self._buffer)
 
     def reset(self) -> None:
         self.state = SegmentState.IDLE
@@ -96,6 +115,7 @@ class Segmenter:
         self._recent_motion.clear()
         self._armed = True
         self._still_since_ms = self._hands_absent_since_ms = None
+        self._gap_frames = self._open_gap = 0
 
     def feed(self, landmarks: Landmarks) -> Utterance | None:
         hands = _present_hands(landmarks)
@@ -109,10 +129,13 @@ class Segmenter:
                 self._armed = True
                 self._still_since_ms = None
                 self._hands_absent_since_ms = None
+                self._gap_frames = self._open_gap = 0
             return None
 
         # ACTIVE (or just-emitted BOUNDARY, which behaves like ACTIVE going forward)
         if not hands:
+            if self._armed and self._buffer:
+                self._open_gap += 1
             # A pause is timed over frames that show a still hand. Carried across a gap,
             # the old start time would close the word the instant the hands came back.
             self._still_since_ms = None
@@ -122,12 +145,14 @@ class Segmenter:
             if landmarks.ts_ms - self._hands_absent_since_ms >= self.hands_absent_ms:
                 # Dropping the hands is how people end a sign, so it closes the word.
                 # Only frames with hands are buffered, so nothing idle is included, and
-                # a flicker shorter than min_frames is still discarded.
-                utterance = self._close() if self._armed and len(self._buffer) >= self.min_frames else None
+                # a flicker too short to be a sign is still discarded.
+                utterance = self._close() if self._armed and self._long_enough() else None
                 self.reset()
                 return utterance
             return None
         self._hands_absent_since_ms = None
+        self._gap_frames += self._open_gap      # the hands came back: that was a hole in the word
+        self._open_gap = 0
 
         self._recent_motion.append(_hands_motion(self._prev_hands, hands))
         self._prev_hands = hands
@@ -140,6 +165,7 @@ class Segmenter:
                 self._armed = True
                 self._buffer = [landmarks]
                 self._still_since_ms = None
+            self._gap_frames = 0                # nothing before the new word's first frame counts
             return None
 
         self._buffer.append(landmarks)
@@ -154,9 +180,11 @@ class Segmenter:
         paused = (
             self._still_since_ms is not None
             and landmarks.ts_ms - self._still_since_ms >= self.pause_ms
-            and len(self._buffer) >= self.min_frames
+            and self._long_enough()
         )
-        if paused or len(self._buffer) >= self.max_frames:
+        too_long = len(self._buffer) >= self.max_frames or (
+            self.max_ms > 0 and landmarks.ts_ms - self._buffer[0].ts_ms >= self.max_ms)
+        if paused or too_long:
             self.state = SegmentState.BOUNDARY
             utterance = self._close()
             # Ready for the next word once the hands move again; ACTIVE semantics resume.
@@ -164,13 +192,20 @@ class Segmenter:
             self._buffer = []
             self._still_since_ms = None
             self._armed = False
+            self._gap_frames = self._open_gap = 0
             return utterance
 
         return None
+
+    def _long_enough(self) -> bool:
+        """Enough frames for the model to read, spread over enough time to be a sign."""
+        return (len(self._buffer) >= self.min_frames
+                and self._buffer[-1].ts_ms - self._buffer[0].ts_ms >= self.min_ms)
 
     def _close(self) -> Utterance:
         return Utterance(
             landmarks=list(self._buffer),
             t_start=self._buffer[0].ts_ms,
             t_end=self._buffer[-1].ts_ms,
+            frames_without_hands=self._gap_frames,
         )

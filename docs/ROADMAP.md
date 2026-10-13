@@ -61,8 +61,50 @@ recruitment — but it means the gates below are **unmet**, not
   `POST /training/trigger` trains inside the request, no automatic rollout halt on bad live
   metrics, and the fleet record's single `language`/`current_model_version` beside the
   per-language `model_versions`.
-- **No real signer data exists.** `data/` contains only `synthetic/`. `models/signoo.pt`
-  is trained on synthetic data, not real LIU recordings. Phase 0's exit criteria
+- **Live path made honest about tracker speed, 2026-10-13** (kiosk only; tests in
+  `kiosk/tests/test_live_feedback.py` and `test_perception_lifecycle.py`; method and
+  figures in `docs/LIVE_PIPELINE.md` §15):
+  - *The finding.* The word-boundary rule was written in frames ("at least 6"), which is
+    0.2 s at the 30 tracked frames a second the design assumes and 0.6 s at the ~10 the
+    Jetson reaches. Quick signs were thrown away with nothing shown. It was found by
+    driving the real backend over its WebSocket with recorded clips, which no unit test
+    did; `kiosk/replay.py --tracker-fps` now reproduces it on a development machine. The
+    rule is a time now (3 frames over 150 ms, 4.5 s at most).
+  - *A second fault of the same family:* a tracking result was only collected when the
+    next frame arrived. With the browser now waiting for a result before sending again,
+    the two stalled each other and every second result was lost. Results are now handled
+    the moment the tracker finishes. Over the real WebSocket on a busy PC, six validation
+    clips went from no word at all to an outcome for every clip.
+  - *Phase 0's perception exit criterion is not met and is now measured to be far off:*
+    about 10 tracked frames a second on the Jetson's CPU against the ≥30 required. The
+    TensorRT/GPU path is unstarted. This is the largest open engineering item on the
+    kiosk and it needs the device.
+  - *What the visitor is told:* "signing…" and "reading your sign…" states from the
+    segmenter (NFR-X1), a lighting warning (FR-K5), and "I couldn't see your hands" in
+    place of a guess when tracking lost most of a sign. The Arabic of these is unreviewed.
+  - *What the kiosk reports:* tracker rate, stage timings, memory and outcome counts on
+    `/health`, and one `recognition` log line per sign (B9). Not yet in the heartbeat,
+    so not in the console.
+  - *Faster start:* each model takes a test pass at start-up, and the tracker starts when
+    a language card is pressed, so signing can begin at consent. A tracker is now always
+    closed; one left to the garbage collector deadlocks MediaPipe.
+  - *`liu` says "coming soon"* in the data too, held by a test; every card starts
+    disabled in the page. **No visitor can use Jordanian until real recordings exist.**
+  - *`scripts/deploy-jetson.sh`* sends the kiosk to the Jetson with a backup and a health
+    check. Only its dry run and unreachable path have been run: the Jetson could not be
+    reached all day (the development PC turned out to be on a different network from the
+    Jetson's `192.168.100.x`), so **none of the above is on the device yet.** When it is
+    reachable: deploy, then run `kiosk/live_check.py --url` against it, which puts known
+    clips through the device's own tracker.
+  - *Drift recorded, not resolved* (`SYSTEM_DESIGN.md` §8, questions 9–11): presence
+    detection keeps the camera on before consent; the overlay is corner marks, not the
+    skeleton FR-K4 names; the pause that ends a word is itself longer than NFR-P1 allows.
+  - *American thresholds* are 0.80 to commit and 0.25 to refuse, with per-word bars
+    (`models/asl50.bars.pt`). The bars were fitted and scored on the same validation
+    clips, so the gain is optimistic until checked on other signers.
+- **No real Jordanian signer data exists.** For `liu`, `data/` contains only
+  `synthetic/` (the American folders beside it are public datasets, see the next item).
+  `models/signoo.pt` is trained on synthetic data, not real LIU recordings. Phase 0's exit criteria
   (≥5 signers committed, consent pack approved) and Phase 1's (50 signs × 10 signers
   × 5 reps, ≥85% signer-independent) are both **not yet met** — the single biggest gap
   between this document and reality.
@@ -74,6 +116,11 @@ recruitment — but it means the gates below are **unmet**, not
   pipeline on real human signing and says nothing about Jordanian Sign Language.
   Recipe and caveats: `docs/TRAINING.md`. It stays "Pilot" until Deaf ASL users have
   tried it on the kiosk camera.
+  *Since 2026-10-12* the kiosk runs a 50-word PopSign model in that slot
+  (`models/asl50.bars.pt`): about 71% top-1 and 87% top-3 on its validation signers,
+  well under NFR-Q1's 85% and NFR-Q3's 95%. Its test signers have not been scored. A
+  434-word research model also exists (`docs/TRAINING.md`), built partly on ASL Citizen,
+  whose licence does not allow a commercial product (R12).
 - **Found while wiring that up:** the live Jordanian model's labels are
   `sign_000 … sign_019` (synthetic), which match nothing in `core/vocab.json`
   (`salam`, `marhaba`, …). A recognised LIU sign would render as a placeholder, not a

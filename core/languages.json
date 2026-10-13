@@ -1,6 +1,6 @@
 [
-  {"code": "liu",  "model": "models/signoo.pt",    "vocab": "core/vocab.json",     "knowledge_base": "kiosk/data/knowledge_base.json",     "clip_library": "core/clip_library.json",     "status": "live",  "real_data": false},
-  {"code": "asl",  "model": "models/asl50.pt", "vocab": "core/vocab_asl.json", "knowledge_base": "kiosk/data/knowledge_base_asl.json", "clip_library": "core/clip_library_asl.json", "status": "pilot", "real_data": true, "confident_threshold": 0.88},
+  {"code": "liu",  "model": "models/signoo.pt",    "vocab": "core/vocab.json",     "knowledge_base": "kiosk/data/knowledge_base.json",     "clip_library": "core/clip_library.json",     "status": "coming_soon", "real_data": false},
+  {"code": "asl",  "model": "models/asl50.bars.pt", "vocab": "core/vocab_asl.json", "knowledge_base": "kiosk/data/knowledge_base_asl.json", "clip_library": "core/clip_library_asl.json", "status": "pilot", "real_data": true, "confident_threshold": 0.80, "reject_threshold": 0.25},
   {"code": "esl",  "model": null, "vocab": null, "status": "coming_soon", "real_data": false},
   {"code": "ssl",  "model": null, "vocab": null, "status": "coming_soon", "real_data": false},
   {"code": "lsf",  "model": null, "vocab": null, "status": "coming_soon", "real_data": false},

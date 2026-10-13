@@ -42,6 +42,10 @@ class Utterance:
     landmarks: list[Landmarks]
     t_start: int
     t_end: int
+    # Frames inside the clip where tracking lost both hands and then found them again.
+    # They are not in `landmarks` (only frames with a hand are), so this is the only
+    # record that the sign has holes in it.
+    frames_without_hands: int = 0
 
 
 @dataclass

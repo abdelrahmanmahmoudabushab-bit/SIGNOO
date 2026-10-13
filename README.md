@@ -133,7 +133,7 @@ this table covers what lives at the repo root and in the shared/training pieces.
 |---|---|
 | `index.html` | The kiosk's browser frontend (Arabic, RTL) — the six-screen visitor flow, served by `kiosk/main.py` |
 | `assets/app.js` | WebSocket client driving the kiosk flow: camera, screens, presence auto-detect |
-| `assets/vision.js` | Canvas skeleton-overlay drawing only — perception itself runs server-side in `kiosk/perception.py` |
+| `assets/vision.js` | Canvas drawing only: corner marks round the hands and face that glide between tracker updates (the older skeleton overlay is still in the file, switched off). Perception itself runs server-side in `kiosk/perception.py` |
 | `assets/kiosk.css` | Kiosk visual design |
 | `assets/vocab.js` | Kept only for `record.html`; the kiosk frontend fetches `core/vocab.json` directly |
 | `record.html` · `assets/record.js` | Dataset recording studio (unchanged by the kiosk rebuild) |

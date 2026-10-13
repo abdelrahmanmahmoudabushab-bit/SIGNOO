@@ -18,7 +18,7 @@ import numpy as np
 import torch
 
 from core.contracts import Hypothesis, Utterance
-from core.features import FRAME_DIM, INPUT_DIMS, model_input, normalise_frame, resample
+from core.features import FRAME_DIM, INPUT_DIMS, SEQ_LEN, model_input, normalise_frame, resample
 
 # Feature versions B2 Perception supplies everything for. Version 3 also needs face landmarks
 # (core.features.face_features), which the live pipeline does not carry yet, so a version-3
@@ -115,6 +115,20 @@ class Recognizer:
         make the kiosk stricter than the language's calibrated bar, never looser.
         """
         return max(self.confident_threshold, self.word_bars.get(gloss, 0.0)) if gloss else self.confident_threshold
+
+    def warm_up(self) -> float | None:
+        """Runs one throwaway forward pass so the first real sign does not pay PyTorch's
+        first-call cost (thread pool start-up, buffer allocation), which is the slowest
+        moment of a visit. Returns the seconds it took, or None if it could not run: a
+        failed warm-up must never stop the kiosk, the real call will report any real fault."""
+        import time
+        try:
+            started = time.perf_counter()
+            with torch.no_grad():
+                self.model(torch.zeros(1, SEQ_LEN, INPUT_DIMS[self.feature_version]))
+            return time.perf_counter() - started
+        except Exception:
+            return None
 
     def classify(self, utterance: Utterance) -> Hypothesis:
         clip = self._features(utterance, self.feature_version)
