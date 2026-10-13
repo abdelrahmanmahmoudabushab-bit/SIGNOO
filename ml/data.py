@@ -157,13 +157,17 @@ class SignDataset(Dataset):
     """Feature tensors with light augmentation, applied to the training split only."""
 
     def __init__(self, samples, labels, augment=False, mirror_prob=0.0, rng_seed=0, feature_version=1,
-                 strong=False):
+                 strong=False, tta_view=None):
         self.samples = samples
         self.labels = labels
         self.augment = augment
         self.mirror_prob = mirror_prob
         self.feature_version = feature_version
         self.strong = strong
+        # Test-time augmentation: view 0/None is the clip as recorded; view k >= 1 is a gentle,
+        # *deterministic* re-timing of it (same for a given clip and k), so averaging the model's
+        # answers over views is repeatable and never trains on or leaks anything.
+        self.tta_view = tta_view
         self.rng = np.random.default_rng(rng_seed)
 
     def __len__(self):
@@ -177,6 +181,13 @@ class SignDataset(Dataset):
 
         if self.augment:
             clip, face, duration = self._augment(clip, face, duration)
+        elif self.tta_view:
+            rng = np.random.default_rng([int(self.tta_view), i])
+            positions, covered = time_positions(rng, warp=0.12, crop=0.03, loosen=0.02)
+            clip = _sample(clip, positions)
+            face = _sample(face, positions) if face is not None else None
+            if duration is not None:
+                duration = duration * covered
 
         return (model_input(clip, self.feature_version, face=face, duration=duration),
                 self.labels[sample.sign_id])

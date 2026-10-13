@@ -21,18 +21,25 @@ from data import SignDataset, load_manifest, split_by_signer
 from model import build_model
 
 
-def predict(model, samples, labels, device, batch_size=32, feature_version=1):
-    loader = DataLoader(SignDataset(samples, labels, augment=False, feature_version=feature_version),
-                        batch_size=batch_size)
-    preds, probs = [], []
+def predict(model, samples, labels, device, batch_size=32, feature_version=1, tta=1):
+    """Predicted class and class probabilities per clip.
+
+    With `tta` > 1 each clip is also scored through tta-1 gentle, deterministic re-timings of itself
+    and the probabilities are averaged: a free few points when the model's answer wobbles with timing.
+    """
     model.eval()
-    with torch.no_grad():
-        for x, _ in loader:
-            logits = model(x.to(device).float())
-            p = torch.softmax(logits, dim=1)
-            probs.append(p.cpu().numpy())
-            preds.append(logits.argmax(1).cpu().numpy())
-    return np.concatenate(preds), np.concatenate(probs)
+    totals = None
+    for view in range(max(1, tta)):
+        loader = DataLoader(SignDataset(samples, labels, augment=False, feature_version=feature_version,
+                                        tta_view=view), batch_size=batch_size)
+        views = []
+        with torch.no_grad():
+            for x, _ in loader:
+                views.append(torch.softmax(model(x.to(device).float()), dim=1).cpu().numpy())
+        views = np.concatenate(views)
+        totals = views if totals is None else totals + views
+    probs = totals / max(1, tta)
+    return probs.argmax(1), probs
 
 
 def main():
@@ -41,6 +48,8 @@ def main():
     ap.add_argument("manifest")
     ap.add_argument("--split", required=True)
     ap.add_argument("--report", help="write full metrics to this JSON file")
+    ap.add_argument("--tta", type=int, default=1,
+                    help="score each clip through this many gentle re-timings and average (1 = off)")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -54,7 +63,8 @@ def main():
 
     model = build_model(ckpt).to(device)
 
-    preds, probs = predict(model, test, labels, device, feature_version=ckpt.get("feature_version", 1))
+    preds, probs = predict(model, test, labels, device, feature_version=ckpt.get("feature_version", 1),
+                           tta=args.tta)
     truth = np.array([labels[s.sign_id] for s in test])
     correct = preds == truth
 

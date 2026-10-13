@@ -65,7 +65,45 @@ def loaders(manifest, split_file, batch_size, mirror_prob, seed, feature_version
     )
 
 
-def run_epoch(model, loader, criterion, device, optimiser=None, supcon=0.0):
+class ModelEMA:
+    """A running average of the model's weights, updated after every optimiser step.
+
+    SGD-style training jitters around a good region; the average of the last few thousand steps sits
+    in the middle of it, which is almost always a little more accurate and, importantly, steadier from
+    epoch to epoch, so the "best epoch" picked on validation is less a matter of luck. The averaged copy
+    is what is validated and what is saved. Early on the decay is eased up from 0 (decay = (1+n)/(10+n),
+    capped at `decay`) so the average is not dominated by the random initial weights.
+    """
+
+    def __init__(self, model, decay: float = 0.998):
+        import copy
+        self.decay, self.updates = decay, 0
+        self.module = copy.deepcopy(model).eval()
+        for p in self.module.parameters():
+            p.requires_grad_(False)
+
+    @torch.no_grad()
+    def update(self, model):
+        self.updates += 1
+        d = min(self.decay, (1 + self.updates) / (10 + self.updates))
+        source = model.state_dict()
+        for name, value in self.module.state_dict().items():
+            if value.dtype.is_floating_point:
+                value.mul_(d).add_(source[name].detach(), alpha=1 - d)
+            else:
+                value.copy_(source[name])
+
+
+def lr_factor(epoch: int, epochs: int, warmup: int) -> float:
+    """Linear warm-up for `warmup` epochs, then cosine decay to zero at `epochs`."""
+    import math
+    if warmup and epoch < warmup:
+        return (epoch + 1) / warmup
+    progress = (epoch - warmup) / max(1, epochs - warmup)
+    return 0.5 * (1 + math.cos(math.pi * min(1.0, progress)))
+
+
+def run_epoch(model, loader, criterion, device, optimiser=None, supcon=0.0, after_step=None):
     training = optimiser is not None
     model.train(training)
 
@@ -90,6 +128,8 @@ def run_epoch(model, loader, criterion, device, optimiser=None, supcon=0.0):
                 # costs nothing and prevents a run from destroying itself.
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimiser.step()
+                if after_step is not None:
+                    after_step(model)
 
             total_loss += loss.item() * len(y)
             correct += (logits.argmax(1) == y).sum().item()
@@ -124,6 +164,11 @@ def main():
                     help="class-balanced sampling strength, 0 (off) to 1 (fully balanced); 0.5 is typical")
     ap.add_argument("--supcon", type=float, default=0.0,
                     help="weight of the supervised contrastive loss (signnet only); 0.1-0.3 is typical")
+    ap.add_argument("--ema", type=float, default=0.0,
+                    help="validate and save a running average of the weights with this decay "
+                         "(0 = off; 0.998 is a good start for a few thousand steps)")
+    ap.add_argument("--warmup", type=int, default=0,
+                    help="epochs of linear learning-rate warm-up before the cosine decay (0 = off)")
     ap.add_argument("--strong-augment", action="store_true",
                     help="also drop a hand for a stretch, rotate a few degrees, zoom slightly")
     ap.add_argument("--pretrained", help="encoder weights from ml/pretrain.py to start from (signnet only)")
@@ -167,7 +212,11 @@ def main():
     # wrong, so training the model to be absolutely certain is training it to be wrong.
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimiser = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=args.epochs)
+    if args.warmup:
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimiser, lambda e: lr_factor(e, args.epochs, args.warmup))
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=args.epochs)
+    ema = ModelEMA(model, args.ema) if args.ema > 0 else None
 
     best_acc, best_epoch, history = 0.0, -1, []
     out = Path(args.out)
@@ -175,8 +224,10 @@ def main():
     started = time.time()
 
     for epoch in range(args.epochs):
-        train_loss, train_acc = run_epoch(model, train_loader, criterion, device, optimiser, args.supcon)
-        val_loss, val_acc = run_epoch(model, val_loader, criterion, device)
+        train_loss, train_acc = run_epoch(model, train_loader, criterion, device, optimiser, args.supcon,
+                                          after_step=ema.update if ema else None)
+        evaluated = ema.module if ema else model
+        val_loss, val_acc = run_epoch(evaluated, val_loader, criterion, device)
         scheduler.step()
         history.append({"epoch": epoch, "train_loss": train_loss, "train_acc": train_acc,
                         "val_loss": val_loss, "val_acc": val_acc})
@@ -184,7 +235,7 @@ def main():
         marker = ""
         if val_acc > best_acc:
             best_acc, best_epoch = val_acc, epoch
-            torch.save({"model": model.state_dict(), "labels": labels,
+            torch.save({"model": evaluated.state_dict(), "labels": labels,
                         "input_dim": INPUT_DIMS[args.features], "feature_version": args.features,
                         "arch": args.arch, "config": config,
                         "epoch": epoch, "val_acc": val_acc},
